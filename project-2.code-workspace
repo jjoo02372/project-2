@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../project-1/node_modules"
+		},
+		{
+			"path": "../project-1/public"
+		},
+		{
+			"path": "../project-1/src"
+		}
+	],
+	"settings": {}
+}
