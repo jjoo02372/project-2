@@ -537,3 +537,24 @@ code {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+/* Step 6 특별 UI 스타일 */
+.space-y-4 > * + * {
+  margin-top: 1rem;
+}
+
+.space-y-6 > * + * {
+  margin-top: 1.5rem;
+}
+
+.cursor-crosshair {
+  cursor: crosshair;
+}
+
+.bg-orange-600 {
+  background-color: #ea580c;
+}
+
+.hover\:bg-orange-700:hover {
+  background-color: #c2410c;
+}

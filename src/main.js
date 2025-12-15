@@ -13,6 +13,12 @@ let aiResponse = '';
 let apiKey = '';
 let apiStatus = 'unknown'; // 'unknown', 'testing', 'valid', 'invalid'
 let chatHistory = {}; // 각 단계별 대화 기록 { stepId: [{role, content}, ...] }
+let step6Data = { // 6번 단계 전용 데이터
+  tableData: [], // 표 데이터
+  canvasImage: null, // 그림판 이미지 (base64)
+  graphData: null, // 그래프 데이터
+  graphType: 'bar' // 그래프 타입: 'bar', 'line', 'pie'
+};
 
 // Load data from localStorage
 function loadData() {
@@ -50,6 +56,17 @@ function loadData() {
       chatHistory = {};
     }
   }
+  
+  // Load step 6 data
+  const savedStep6Data = localStorage.getItem('step6-data');
+  if (savedStep6Data) {
+    try {
+      step6Data = JSON.parse(savedStep6Data);
+    } catch (error) {
+      console.error('Failed to load step 6 data:', error);
+      step6Data = { tableData: [], canvasImage: null, graphData: null, graphType: 'bar' };
+    }
+  }
 }
 
 // Save data to localStorage
@@ -64,6 +81,11 @@ function saveChatHistory() {
   if (Object.keys(chatHistory).length > 0) {
     localStorage.setItem('chat-history', JSON.stringify(chatHistory));
   }
+}
+
+// Save step 6 data to localStorage
+function saveStep6Data() {
+  localStorage.setItem('step6-data', JSON.stringify(step6Data));
 }
 
 // API Key Status Banner
@@ -390,26 +412,671 @@ function createStepCard() {
     headerDiv.appendChild(promptsDiv);
   }
   
+  div.appendChild(headerDiv);
+  
+  // 6번 단계(결과 정리)일 때 특별한 UI 표시
+  if (currentStep === 6) {
+    div.appendChild(createStep6SpecialUI());
+  } else {
+    // 일반 단계는 textarea 사용
+    const textarea = document.createElement('textarea');
+    textarea.value = currentContent;
+    textarea.placeholder = currentStepData.placeholder;
+    textarea.className = 'w-full h-48 p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none';
+    textarea.setAttribute('data-step-textarea', currentStep);
+    
+    const charCount = document.createElement('p');
+    charCount.className = 'text-sm text-gray-500 mt-2 char-count-display';
+    charCount.textContent = `글자 수: ${currentContent.length}`;
+    
+    textarea.addEventListener('input', (e) => {
+      const value = e.target.value;
+      handleContentChange(value);
+      charCount.textContent = `글자 수: ${value.length}`;
+      updateAIAssistantButton();
+    });
+    
+    div.appendChild(textarea);
+    div.appendChild(charCount);
+  }
+  
+  return div;
+}
+
+// Step 6 Special UI (표 편집기, 그림판, 그래프)
+function createStep6SpecialUI() {
+  const container = document.createElement('div');
+  container.className = 'space-y-6';
+  
+  // 탭 메뉴
+  const tabContainer = document.createElement('div');
+  tabContainer.className = 'border-b border-gray-200 mb-4';
+  const tabList = document.createElement('div');
+  tabList.className = 'flex gap-2';
+  
+  const tabs = [
+    { id: 'text', label: '📝 텍스트', icon: '📝' },
+    { id: 'table', label: '📊 표 편집', icon: '📊' },
+    { id: 'drawing', label: '✏️ 그림판', icon: '✏️' },
+    { id: 'graph', label: '📈 그래프', icon: '📈' }
+  ];
+  
+  let activeTab = 'text';
+  
+  tabs.forEach(tab => {
+    const tabButton = document.createElement('button');
+    tabButton.className = `px-4 py-2 rounded-t-lg transition-colors ${activeTab === tab.id ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`;
+    tabButton.textContent = tab.label;
+    tabButton.addEventListener('click', () => {
+      activeTab = tab.id;
+      renderStep6Tabs();
+    });
+    tabList.appendChild(tabButton);
+  });
+  
+  tabContainer.appendChild(tabList);
+  container.appendChild(tabContainer);
+  
+  // 콘텐츠 영역
+  const contentArea = document.createElement('div');
+  contentArea.id = 'step6-content-area';
+  container.appendChild(contentArea);
+  
+  function renderStep6Tabs() {
+    contentArea.innerHTML = '';
+    
+    // 탭 버튼 상태 업데이트
+    tabList.querySelectorAll('button').forEach((btn, idx) => {
+      if (tabs[idx].id === activeTab) {
+        btn.className = 'px-4 py-2 rounded-t-lg transition-colors bg-blue-600 text-white';
+      } else {
+        btn.className = 'px-4 py-2 rounded-t-lg transition-colors bg-gray-100 text-gray-700 hover:bg-gray-200';
+      }
+    });
+    
+    switch(activeTab) {
+      case 'text':
+        contentArea.appendChild(createStep6TextEditor());
+        break;
+      case 'table':
+        contentArea.appendChild(createStep6TableEditor());
+        break;
+      case 'drawing':
+        contentArea.appendChild(createStep6DrawingBoard());
+        break;
+      case 'graph':
+        contentArea.appendChild(createStep6GraphViewer());
+        break;
+    }
+  }
+  
+  // 초기 렌더링
+  renderStep6Tabs();
+  
+  return container;
+}
+
+// Step 6 텍스트 에디터
+function createStep6TextEditor() {
+  const div = document.createElement('div');
   const textarea = document.createElement('textarea');
-  textarea.value = currentContent;
-  textarea.placeholder = currentStepData.placeholder;
+  textarea.value = reportData[6] || '';
+  textarea.placeholder = '텍스트로 결과를 정리하세요...';
   textarea.className = 'w-full h-48 p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none';
-  textarea.setAttribute('data-step-textarea', currentStep);
+  textarea.setAttribute('data-step-textarea', '6');
   
   const charCount = document.createElement('p');
-  charCount.className = 'text-sm text-gray-500 mt-2 char-count-display';
-  charCount.textContent = `글자 수: ${currentContent.length}`;
+  charCount.className = 'text-sm text-gray-500 mt-2';
+  charCount.textContent = `글자 수: ${textarea.value.length}`;
   
   textarea.addEventListener('input', (e) => {
     const value = e.target.value;
     handleContentChange(value);
-    // 글자 수는 즉시 업데이트 (handleContentChange에서도 업데이트하지만 중복 방지)
     charCount.textContent = `글자 수: ${value.length}`;
+    updateAIAssistantButton();
   });
   
-  div.appendChild(headerDiv);
   div.appendChild(textarea);
   div.appendChild(charCount);
+  return div;
+}
+
+// Step 6 표 편집기
+function createStep6TableEditor() {
+  const div = document.createElement('div');
+  div.className = 'space-y-4';
+  
+  // 도구 모음
+  const toolbar = document.createElement('div');
+  toolbar.className = 'flex gap-2 mb-4 flex-wrap';
+  
+  const addRowBtn = document.createElement('button');
+  addRowBtn.className = 'px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors';
+  addRowBtn.textContent = '➕ 행 추가';
+  addRowBtn.addEventListener('click', () => {
+    if (step6Data.tableData.length === 0) {
+      step6Data.tableData = [['', '']];
+    } else {
+      const colCount = step6Data.tableData[0].length;
+      step6Data.tableData.push(new Array(colCount).fill(''));
+    }
+    saveStep6Data();
+    renderTable();
+  });
+  
+  const addColBtn = document.createElement('button');
+  addColBtn.className = 'px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors';
+  addColBtn.textContent = '➕ 열 추가';
+  addColBtn.addEventListener('click', () => {
+    if (step6Data.tableData.length === 0) {
+      step6Data.tableData = [['', '']];
+    } else {
+      step6Data.tableData.forEach(row => row.push(''));
+    }
+    saveStep6Data();
+    renderTable();
+  });
+  
+  const delRowBtn = document.createElement('button');
+  delRowBtn.className = 'px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors';
+  delRowBtn.textContent = '➖ 행 삭제';
+  delRowBtn.addEventListener('click', () => {
+    if (step6Data.tableData.length > 1) {
+      step6Data.tableData.pop();
+      saveStep6Data();
+      renderTable();
+    }
+  });
+  
+  const delColBtn = document.createElement('button');
+  delColBtn.className = 'px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors';
+  delColBtn.textContent = '➖ 열 삭제';
+  delColBtn.addEventListener('click', () => {
+    if (step6Data.tableData.length > 0 && step6Data.tableData[0].length > 1) {
+      step6Data.tableData.forEach(row => row.pop());
+      saveStep6Data();
+      renderTable();
+    }
+  });
+  
+  toolbar.appendChild(addRowBtn);
+  toolbar.appendChild(addColBtn);
+  toolbar.appendChild(delRowBtn);
+  toolbar.appendChild(delColBtn);
+  
+  // 표 영역
+  const tableContainer = document.createElement('div');
+  tableContainer.className = 'overflow-x-auto border border-gray-300 rounded-lg';
+  tableContainer.id = 'step6-table-container';
+  
+  function renderTable() {
+    tableContainer.innerHTML = '';
+    
+    if (step6Data.tableData.length === 0) {
+      step6Data.tableData = [['', ''], ['', '']];
+    }
+    
+    const table = document.createElement('table');
+    table.className = 'w-full border-collapse';
+    
+    step6Data.tableData.forEach((row, rowIdx) => {
+      const tr = document.createElement('tr');
+      row.forEach((cell, colIdx) => {
+        const td = document.createElement('td');
+        td.className = 'border border-gray-300 p-2';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = cell;
+        input.className = 'w-full p-1 border-none focus:outline-none focus:bg-blue-50';
+        input.addEventListener('input', (e) => {
+          step6Data.tableData[rowIdx][colIdx] = e.target.value;
+          saveStep6Data();
+        });
+        td.appendChild(input);
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    
+    tableContainer.appendChild(table);
+  }
+  
+  renderTable();
+  
+  div.appendChild(toolbar);
+  div.appendChild(tableContainer);
+  
+  return div;
+}
+
+// Step 6 그림판
+function createStep6DrawingBoard() {
+  const div = document.createElement('div');
+  div.className = 'space-y-4';
+  
+  // 도구 모음
+  const toolbar = document.createElement('div');
+  toolbar.className = 'flex gap-2 mb-4 flex-wrap items-center';
+  
+  let currentTool = 'pen';
+  let currentColor = '#000000';
+  let currentSize = 3;
+  
+  const tools = [
+    { id: 'pen', label: '✏️ 연필' },
+    { id: 'highlighter', label: '🖍️ 형광펜' },
+    { id: 'eraser', label: '🧹 지우개' }
+  ];
+  
+  tools.forEach(tool => {
+    const toolBtn = document.createElement('button');
+    toolBtn.className = `px-4 py-2 rounded-lg transition-colors ${currentTool === tool.id ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`;
+    toolBtn.textContent = tool.label;
+    toolBtn.setAttribute('data-tool', tool.id);
+    toolBtn.addEventListener('click', () => {
+      currentTool = tool.id;
+      tools.forEach(t => {
+        const btn = toolbar.querySelector(`[data-tool="${t.id}"]`);
+        if (btn) {
+          if (t.id === currentTool) {
+            btn.className = 'px-4 py-2 rounded-lg transition-colors bg-blue-600 text-white';
+          } else {
+            btn.className = 'px-4 py-2 rounded-lg transition-colors bg-gray-200 text-gray-700 hover:bg-gray-300';
+          }
+        }
+      });
+    });
+    toolbar.appendChild(toolBtn);
+  });
+  
+  const colorLabel = document.createElement('span');
+  colorLabel.className = 'ml-4 font-semibold text-gray-700';
+  colorLabel.textContent = '색상:';
+  
+  const colorInput = document.createElement('input');
+  colorInput.type = 'color';
+  colorInput.value = currentColor;
+  colorInput.className = 'ml-2 w-12 h-8 border border-gray-300 rounded';
+  colorInput.addEventListener('change', (e) => {
+    currentColor = e.target.value;
+  });
+  
+  const sizeLabel = document.createElement('span');
+  sizeLabel.className = 'ml-4 font-semibold text-gray-700';
+  sizeLabel.textContent = '크기:';
+  
+  const sizeInput = document.createElement('input');
+  sizeInput.type = 'range';
+  sizeInput.min = '1';
+  sizeInput.max = '20';
+  sizeInput.value = currentSize;
+  sizeInput.className = 'ml-2';
+  const sizeValue = document.createElement('span');
+  sizeValue.className = 'ml-2 text-gray-700';
+  sizeValue.textContent = currentSize;
+  sizeInput.addEventListener('input', (e) => {
+    currentSize = parseInt(e.target.value);
+    sizeValue.textContent = currentSize;
+  });
+  
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'ml-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors';
+  clearBtn.textContent = '🗑️ 전체 지우기';
+  
+  toolbar.appendChild(colorLabel);
+  toolbar.appendChild(colorInput);
+  toolbar.appendChild(sizeLabel);
+  toolbar.appendChild(sizeInput);
+  toolbar.appendChild(sizeValue);
+  toolbar.appendChild(clearBtn);
+  
+  // 캔버스
+  const canvasContainer = document.createElement('div');
+  canvasContainer.className = 'border border-gray-300 rounded-lg p-4 bg-white';
+  
+  const canvas = document.createElement('canvas');
+  canvas.width = 800;
+  canvas.height = 500;
+  canvas.className = 'border border-gray-200 rounded cursor-crosshair';
+  canvas.style.display = 'block';
+  canvas.style.maxWidth = '100%';
+  canvas.style.height = 'auto';
+  
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // 저장된 이미지가 있으면 로드
+  if (step6Data.canvasImage) {
+    const img = new Image();
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0);
+    };
+    img.src = step6Data.canvasImage;
+  }
+  
+  let isDrawing = false;
+  let lastX = 0;
+  let lastY = 0;
+  
+  function startDrawing(e) {
+    isDrawing = true;
+    const rect = canvas.getBoundingClientRect();
+    lastX = e.clientX - rect.left;
+    lastY = e.clientY - rect.top;
+  }
+  
+  function draw(e) {
+    if (!isDrawing) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(x, y);
+    
+    if (currentTool === 'pen') {
+      ctx.strokeStyle = currentColor;
+      ctx.lineWidth = currentSize;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+    } else if (currentTool === 'highlighter') {
+      ctx.strokeStyle = currentColor + '80';
+      ctx.lineWidth = currentSize * 3;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+    } else if (currentTool === 'eraser') {
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = currentSize * 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+    }
+    
+    ctx.stroke();
+    
+    lastX = x;
+    lastY = y;
+    
+    step6Data.canvasImage = canvas.toDataURL();
+    saveStep6Data();
+  }
+  
+  function stopDrawing() {
+    isDrawing = false;
+  }
+  
+  canvas.addEventListener('mousedown', startDrawing);
+  canvas.addEventListener('mousemove', draw);
+  canvas.addEventListener('mouseup', stopDrawing);
+  canvas.addEventListener('mouseout', stopDrawing);
+  
+  clearBtn.addEventListener('click', () => {
+    if (confirm('전체 그림을 지우시겠습니까?')) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      step6Data.canvasImage = canvas.toDataURL();
+      saveStep6Data();
+    }
+  });
+  
+  canvasContainer.appendChild(canvas);
+  
+  div.appendChild(toolbar);
+  div.appendChild(canvasContainer);
+  
+  return div;
+}
+
+// Step 6 그래프 뷰어
+function createStep6GraphViewer() {
+  const div = document.createElement('div');
+  div.className = 'space-y-4';
+  
+  // 그래프 타입 선택
+  const controlPanel = document.createElement('div');
+  controlPanel.className = 'bg-gray-50 p-4 rounded-lg mb-4';
+  
+  const typeLabel = document.createElement('label');
+  typeLabel.className = 'block font-semibold text-gray-700 mb-2';
+  typeLabel.textContent = '그래프 타입:';
+  
+  const typeSelect = document.createElement('select');
+  typeSelect.className = 'w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500';
+  typeSelect.innerHTML = `
+    <option value="bar">막대 그래프</option>
+    <option value="line">꺾은선 그래프</option>
+    <option value="pie">원 그래프</option>
+  `;
+  typeSelect.value = step6Data.graphType || 'bar';
+  
+  typeSelect.addEventListener('change', (e) => {
+    step6Data.graphType = e.target.value;
+    saveStep6Data();
+    renderGraph();
+  });
+  
+  const generateBtn = document.createElement('button');
+  generateBtn.className = 'mt-4 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors';
+  generateBtn.textContent = '📊 표 데이터로 그래프 생성';
+  generateBtn.addEventListener('click', () => {
+    if (step6Data.tableData.length < 2) {
+      alert('표에 데이터를 입력한 후 그래프를 생성해주세요.');
+      return;
+    }
+    generateGraphFromTable();
+    renderGraph();
+  });
+  
+  controlPanel.appendChild(typeLabel);
+  controlPanel.appendChild(typeSelect);
+  controlPanel.appendChild(generateBtn);
+  
+  // 그래프 캔버스
+  const graphContainer = document.createElement('div');
+  graphContainer.className = 'border border-gray-300 rounded-lg p-4 bg-white';
+  graphContainer.id = 'step6-graph-container';
+  
+  function generateGraphFromTable() {
+    const table = step6Data.tableData;
+    if (table.length < 2) return;
+    
+    const headers = table[0];
+    const dataRows = table.slice(1);
+    
+    step6Data.graphData = {
+      labels: headers,
+      datasets: []
+    };
+    
+    dataRows.forEach((row, idx) => {
+      const values = row.map(cell => {
+        const num = parseFloat(cell);
+        return isNaN(num) ? 0 : num;
+      });
+      
+      step6Data.graphData.datasets.push({
+        label: `데이터 ${idx + 1}`,
+        data: values
+      });
+    });
+    
+    saveStep6Data();
+  }
+  
+  function renderGraph() {
+    graphContainer.innerHTML = '';
+    
+    if (!step6Data.graphData) {
+      const message = document.createElement('p');
+      message.className = 'text-gray-500 text-center py-8';
+      message.textContent = '표 데이터로 그래프를 생성해주세요.';
+      graphContainer.appendChild(message);
+      return;
+    }
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 500;
+    canvas.className = 'w-full';
+    canvas.style.maxWidth = '100%';
+    canvas.style.height = 'auto';
+    
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    const padding = 60;
+    const graphWidth = width - padding * 2;
+    const graphHeight = height - padding * 2;
+    
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    
+    const { labels, datasets } = step6Data.graphData;
+    const maxValue = Math.max(...datasets.flatMap(d => d.data), 1);
+    
+    if (step6Data.graphType === 'bar') {
+      const barWidth = graphWidth / (labels.length * datasets.length + datasets.length);
+      let xPos = padding;
+      
+      datasets.forEach((dataset, datasetIdx) => {
+        const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+        const color = colors[datasetIdx % colors.length];
+        
+        dataset.data.forEach((value, idx) => {
+          const barHeight = (value / maxValue) * graphHeight;
+          const x = xPos + idx * (barWidth * datasets.length + barWidth);
+          const y = height - padding - barHeight;
+          
+          ctx.fillStyle = color;
+          ctx.fillRect(x, y, barWidth, barHeight);
+          
+          ctx.fillStyle = '#000000';
+          ctx.font = '12px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText(value.toString(), x + barWidth / 2, y - 5);
+        });
+        
+        xPos += barWidth;
+      });
+      
+      ctx.fillStyle = '#000000';
+      ctx.font = '12px Arial';
+      ctx.textAlign = 'center';
+      labels.forEach((label, idx) => {
+        const x = padding + idx * (barWidth * datasets.length + barWidth) + (barWidth * datasets.length) / 2;
+        ctx.fillText(label, x, height - padding + 20);
+      });
+      
+    } else if (step6Data.graphType === 'line') {
+      const stepX = graphWidth / (labels.length - 1 || 1);
+      const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+      
+      datasets.forEach((dataset, datasetIdx) => {
+        const color = colors[datasetIdx % colors.length];
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        
+        dataset.data.forEach((value, idx) => {
+          const x = padding + idx * stepX;
+          const y = height - padding - (value / maxValue) * graphHeight;
+          
+          if (idx === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+          
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        
+        ctx.stroke();
+      });
+      
+      ctx.fillStyle = '#000000';
+      ctx.font = '12px Arial';
+      ctx.textAlign = 'center';
+      labels.forEach((label, idx) => {
+        const x = padding + idx * stepX;
+        ctx.fillText(label, x, height - padding + 20);
+      });
+      
+    } else if (step6Data.graphType === 'pie') {
+      const centerX = width / 2;
+      const centerY = height / 2;
+      const radius = Math.min(graphWidth, graphHeight) / 2 - 20;
+      
+      const total = datasets[0].data.reduce((sum, val) => sum + val, 0);
+      let currentAngle = -Math.PI / 2;
+      
+      const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
+      
+      datasets[0].data.forEach((value, idx) => {
+        const sliceAngle = (value / total) * Math.PI * 2;
+        
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.arc(centerX, centerY, radius, currentAngle, currentAngle + sliceAngle);
+        ctx.closePath();
+        ctx.fillStyle = colors[idx % colors.length];
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        const labelAngle = currentAngle + sliceAngle / 2;
+        const labelX = centerX + Math.cos(labelAngle) * (radius * 0.7);
+        const labelY = centerY + Math.sin(labelAngle) * (radius * 0.7);
+        
+        ctx.fillStyle = '#000000';
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(labels[idx] || `항목 ${idx + 1}`, labelX, labelY);
+        
+        const percent = ((value / total) * 100).toFixed(1);
+        ctx.font = '10px Arial';
+        ctx.fillText(`${percent}%`, labelX, labelY + 15);
+        
+        currentAngle += sliceAngle;
+      });
+    }
+    
+    if (step6Data.graphType !== 'pie') {
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(padding, padding);
+      ctx.lineTo(padding, height - padding);
+      ctx.lineTo(width - padding, height - padding);
+      ctx.stroke();
+      
+      ctx.fillStyle = '#666666';
+      ctx.font = '10px Arial';
+      ctx.textAlign = 'right';
+      for (let i = 0; i <= 5; i++) {
+        const y = height - padding - (i / 5) * graphHeight;
+        const value = (maxValue * (i / 5)).toFixed(1);
+        ctx.fillText(value, padding - 10, y + 4);
+        ctx.strokeStyle = '#e5e7eb';
+        ctx.beginPath();
+        ctx.moveTo(padding, y);
+        ctx.lineTo(width - padding, y);
+        ctx.stroke();
+      }
+    }
+    
+    graphContainer.appendChild(canvas);
+  }
+  
+  renderGraph();
+  
+  div.appendChild(controlPanel);
+  div.appendChild(graphContainer);
   
   return div;
 }
@@ -471,7 +1138,11 @@ function createAIAssistant() {
   let error = null;
   
   button.addEventListener('click', async () => {
-    if (!currentContent.trim()) {
+    // 실제 textarea에서 최신 값을 가져오기
+    const textarea = document.querySelector(`textarea[data-step-textarea="${currentStep}"]`);
+    const actualContent = textarea ? textarea.value : (reportData[currentStep] || '');
+    
+    if (!actualContent.trim()) {
       alert('먼저 내용을 입력해주세요.');
       return;
     }
@@ -511,10 +1182,14 @@ function createAIAssistant() {
       const recentHistory = chatHistory[currentStep].slice(-10);
       messages.push(...recentHistory);
       
+      // 실제 textarea에서 최신 값을 가져오기
+      const textarea = document.querySelector(`textarea[data-step-textarea="${currentStep}"]`);
+      const actualContent = textarea ? textarea.value : (reportData[currentStep] || '');
+      
       // 현재 사용자 메시지 추가
       const userMessage = currentStepData.aiPrompt 
-        ? `${currentStepData.aiPrompt}\n\n작성한 내용:\n${currentContent}`
-        : `다음은 "${currentStepData.title}" 단계에 작성한 내용입니다:\n\n${currentContent}\n\n이 내용을 검토하고 개선 제안을 해주세요.`;
+        ? `${currentStepData.aiPrompt}\n\n작성한 내용:\n${actualContent}`
+        : `다음은 "${currentStepData.title}" 단계에 작성한 내용입니다:\n\n${actualContent}\n\n이 내용을 검토하고 개선 제안을 해주세요.`;
       
       messages.push({
         role: 'user',
@@ -586,8 +1261,11 @@ function createAIAssistant() {
       div.insertBefore(errorDiv, headerDiv.nextSibling);
     } finally {
       isLoading = false;
+      // 실제 textarea에서 최신 값을 가져와서 버튼 상태 업데이트
+      const textarea = document.querySelector(`textarea[data-step-textarea="${currentStep}"]`);
+      const actualContent = textarea ? textarea.value : (reportData[currentStep] || '');
       const apiKeyToUse = apiKey || import.meta.env.VITE_OPENAI_API_KEY || '';
-      button.disabled = !currentContent.trim() || !apiKeyToUse;
+      button.disabled = !actualContent.trim() || !apiKeyToUse;
       button.textContent = 'AI 검토 요청';
     }
   });
@@ -931,6 +1609,20 @@ function updateCharCount(length) {
   }
 }
 
+// AIAssistant 버튼 상태만 업데이트하는 함수
+function updateAIAssistantButton() {
+  const aiContainer = document.querySelector('.bg-gradient-to-r.from-purple-50.to-pink-50');
+  if (aiContainer) {
+    const aiButton = aiContainer.querySelector('button');
+    if (aiButton && !aiButton.textContent.includes('처리 중')) {
+      const textarea = document.querySelector(`textarea[data-step-textarea="${currentStep}"]`);
+      const actualContent = textarea ? textarea.value : (reportData[currentStep] || '');
+      const apiKeyToUse = apiKey || import.meta.env.VITE_OPENAI_API_KEY || '';
+      aiButton.disabled = !actualContent.trim() || !apiKeyToUse;
+    }
+  }
+}
+
 function updateProgressIndicators() {
   // StepProgress 버튼들 업데이트
   const progressContainer = document.querySelector('.bg-white.rounded-lg.shadow-md.p-4.mb-6 .flex.flex-wrap');
@@ -1023,8 +1715,11 @@ function updateProgressIndicators() {
   if (aiContainer) {
     const aiButton = aiContainer.querySelector('button');
     if (aiButton && !aiButton.textContent.includes('처리 중')) {
-      const currentContent = reportData[currentStep] || '';
-      aiButton.disabled = !currentContent.trim();
+      // 실제 textarea에서 최신 값을 가져오기
+      const textarea = document.querySelector(`textarea[data-step-textarea="${currentStep}"]`);
+      const actualContent = textarea ? textarea.value : (reportData[currentStep] || '');
+      const apiKeyToUse = apiKey || import.meta.env.VITE_OPENAI_API_KEY || '';
+      aiButton.disabled = !actualContent.trim() || !apiKeyToUse;
     }
   }
 }
