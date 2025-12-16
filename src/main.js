@@ -1,9 +1,13 @@
-import { stepGuides } from './data/stepGuides.js';
+﻿import { stepGuides } from './data/stepGuides.js';
 import './index.css';
 
 const STORAGE_KEY = 'science-inquiry-report';
 const API_KEY_STORAGE_KEY = 'openai-api-key';
 const API_STATUS_STORAGE_KEY = 'openai-api-status';
+const STUDENT_INFO_STORAGE_KEY = 'student-info';
+
+// Google Apps Script URL
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyVSconQklqXZjjQph-jmyGbCC0cn5-hoc0siBOFqxl-3030536YOkHcJ_3Wr2NQS51GA/exec";
 
 // App State
 let currentStep = 1;
@@ -13,6 +17,7 @@ let aiResponse = '';
 let apiKey = '';
 let apiStatus = 'unknown'; // 'unknown', 'testing', 'valid', 'invalid'
 let chatHistory = {}; // 각 단계별 대화 기록 { stepId: [{role, content}, ...] }
+let studentInfo = { studentId: '', studentName: '' }; // 학생 정보
 let step6Data = { // 6번 단계 전용 데이터
   tableData: [], // 표 데이터
   canvasImage: null, // 그림판 이미지 (base64)
@@ -67,6 +72,39 @@ function loadData() {
       step6Data = { tableData: [], canvasImage: null, graphData: null, graphType: 'bar' };
     }
   }
+  
+  // Load student info
+  const savedStudentInfo = localStorage.getItem(STUDENT_INFO_STORAGE_KEY);
+  if (savedStudentInfo) {
+    try {
+      studentInfo = JSON.parse(savedStudentInfo);
+    } catch (error) {
+      console.error('Failed to load student info:', error);
+      studentInfo = { studentId: '', studentName: '' };
+    }
+  }
+}
+
+// Save student info to localStorage
+function saveStudentInfo() {
+  localStorage.setItem(STUDENT_INFO_STORAGE_KEY, JSON.stringify(studentInfo));
+}
+
+// Save data to Google Sheets
+async function saveToSheet({ studentId, studentName, step, answer }) {
+  try {
+    const res = await fetch(SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ studentId, studentName, step, answer }),
+    });
+    const json = await res.json();
+    if (!json.ok) throw new Error("save failed");
+    console.log('Data saved to Google Sheets successfully');
+  } catch (error) {
+    console.error('Failed to save to Google Sheets:', error);
+    // 에러가 발생해도 앱은 계속 작동하도록 함
+  }
 }
 
 // Save data to localStorage
@@ -86,6 +124,66 @@ function saveChatHistory() {
 // Save step 6 data to localStorage
 function saveStep6Data() {
   localStorage.setItem('step6-data', JSON.stringify(step6Data));
+}
+
+// Student Info Input Banner
+function createStudentInfoBanner() {
+  const banner = document.createElement('div');
+  banner.id = 'student-info-banner';
+  banner.className = 'w-full py-2 px-4 bg-blue-50 border-b border-blue-200';
+  
+  const container = document.createElement('div');
+  container.className = 'container mx-auto flex items-center justify-between flex-wrap gap-2';
+  
+  const leftDiv = document.createElement('div');
+  leftDiv.className = 'flex items-center gap-3 flex-wrap';
+  
+  const label = document.createElement('span');
+  label.className = 'text-sm font-medium text-gray-700';
+  label.textContent = '👤 학생 정보:';
+  
+  const studentIdInput = document.createElement('input');
+  studentIdInput.type = 'text';
+  studentIdInput.placeholder = '학생 ID';
+  studentIdInput.value = studentInfo.studentId || '';
+  studentIdInput.className = 'px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent';
+  studentIdInput.style.minWidth = '120px';
+  
+  const studentNameInput = document.createElement('input');
+  studentNameInput.type = 'text';
+  studentNameInput.placeholder = '학생 이름';
+  studentNameInput.value = studentInfo.studentName || '';
+  studentNameInput.className = 'px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent';
+  studentNameInput.style.minWidth = '120px';
+  
+  const saveButton = document.createElement('button');
+  saveButton.className = 'px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors';
+  saveButton.textContent = '💾 저장';
+  
+  saveButton.addEventListener('click', () => {
+    studentInfo.studentId = studentIdInput.value.trim();
+    studentInfo.studentName = studentNameInput.value.trim();
+    saveStudentInfo();
+    
+    // 저장 성공 메시지
+    const originalText = saveButton.textContent;
+    saveButton.textContent = '✓ 저장됨';
+    saveButton.style.backgroundColor = '#16a34a';
+    setTimeout(() => {
+      saveButton.textContent = originalText;
+      saveButton.style.backgroundColor = '';
+    }, 2000);
+  });
+  
+  leftDiv.appendChild(label);
+  leftDiv.appendChild(studentIdInput);
+  leftDiv.appendChild(studentNameInput);
+  leftDiv.appendChild(saveButton);
+  
+  container.appendChild(leftDiv);
+  banner.appendChild(container);
+  
+  return banner;
 }
 
 // API Key Status Banner
@@ -333,7 +431,7 @@ function createStepProgress() {
   h2.textContent = '진행 상황';
   
   const buttonContainer = document.createElement('div');
-  buttonContainer.className = 'flex flex-wrap gap-2';
+  buttonContainer.className = 'progress-container flex flex-wrap gap-2';
   
   stepGuides.forEach((step) => {
     const button = document.createElement('button');
@@ -1571,6 +1669,18 @@ function handleStepChange(stepId) {
 function handleContentChange(content) {
   reportData[currentStep] = content;
   saveData();
+  
+  // Google Sheets에 저장 (학생 정보가 있는 경우에만)
+  if (studentInfo.studentId && studentInfo.studentName && content.trim()) {
+    const stepTitle = stepGuides.find(s => s.id === currentStep)?.title || `Step ${currentStep}`;
+    saveToSheet({
+      studentId: studentInfo.studentId,
+      studentName: studentInfo.studentName,
+      step: `${currentStep}. ${stepTitle}`,
+      answer: content
+    });
+  }
+  
   // 전체 렌더링 대신 필요한 부분만 업데이트 (글자 수는 textarea 이벤트에서 직접 업데이트됨)
   updateProgressIndicators();
 }
@@ -1741,22 +1851,42 @@ function render() {
   // API Status Banner at the top
   mainDiv.appendChild(createAPIStatusBanner());
   
+  // Student Info Banner
+  mainDiv.appendChild(createStudentInfoBanner());
+  
   mainDiv.appendChild(createHeader());
   
   const container = document.createElement('div');
   container.className = 'container mx-auto px-4 py-8';
   
-  container.appendChild(createStepProgress());
+  // 2열 레이아웃: 왼쪽(진행상황, 탐구주제, AI도움받기) / 오른쪽(작성현황, 보고서 내보내기)
+  // Updated: 레이아웃 재구성 완료 - 2:1 비율
+  const mainGrid = document.createElement('div');
+  mainGrid.className = 'grid grid-cols-1 lg:grid-cols-3 gap-6';
+  // 데스크톱에서 2:1 비율 강제 적용
+  if (window.innerWidth >= 1024) {
+    mainGrid.style.display = 'grid';
+    mainGrid.style.gridTemplateColumns = '2fr 1fr';
+    mainGrid.style.gap = '1.5rem';
+  }
   
-  const grid = document.createElement('div');
-  grid.className = 'grid grid-cols-1 lg:grid-cols-3 gap-6';
-  
+  // 왼쪽 열 (2/3 너비)
   const leftColumn = document.createElement('div');
-  leftColumn.className = 'lg:col-span-2';
+  leftColumn.className = 'lg:col-span-2 space-y-6';
+  if (window.innerWidth >= 1024) {
+    leftColumn.style.gridColumn = '1';
+  }
   
+  // 진행상황
+  leftColumn.appendChild(createStepProgress());
+  
+  // 탐구주제 (StepCard)
   leftColumn.appendChild(createStepCard());
+  
+  // AI도움받기
   leftColumn.appendChild(createAIAssistant());
   
+  // AI 응답 표시
   if (aiResponse) {
     const aiResponseDiv = document.createElement('div');
     aiResponseDiv.className = 'bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg mb-6';
@@ -1771,6 +1901,7 @@ function render() {
     leftColumn.appendChild(aiResponseDiv);
   }
   
+  // 네비게이션 버튼
   const navigationDiv = document.createElement('div');
   navigationDiv.className = 'flex justify-between items-center bg-white rounded-lg shadow-md p-4';
   
@@ -1796,16 +1927,23 @@ function render() {
   
   leftColumn.appendChild(navigationDiv);
   
+  // 오른쪽 열 (1/3 너비)
   const rightColumn = document.createElement('div');
-  rightColumn.className = 'lg:col-span-1';
+  rightColumn.className = 'lg:col-span-1 space-y-6';
+  if (window.innerWidth >= 1024) {
+    rightColumn.style.gridColumn = '2';
+  }
   
+  // 작성현황
   rightColumn.appendChild(createStatusSidebar());
+  
+  // 보고서 내보내기
   rightColumn.appendChild(createExportButton());
   
-  grid.appendChild(leftColumn);
-  grid.appendChild(rightColumn);
+  mainGrid.appendChild(leftColumn);
+  mainGrid.appendChild(rightColumn);
   
-  container.appendChild(grid);
+  container.appendChild(mainGrid);
   mainDiv.appendChild(container);
   
   app.appendChild(mainDiv);

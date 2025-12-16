@@ -402,6 +402,61 @@ code {
   color: #1d4ed8;
 }
 
+.ring-2 {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+.ring-blue-500 {
+  --tw-ring-color: #3b82f6;
+}
+
+.ring-offset-2 {
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px rgba(59, 130, 246, 0.5);
+}
+
+.ring-offset-1 {
+  box-shadow: 0 0 0 1px #ffffff, 0 0 0 3px rgba(59, 130, 246, 0.5);
+}
+
+.cursor-default {
+  cursor: default;
+}
+
+.bg-gray-100 {
+  background-color: #f3f4f6;
+}
+
+.hover\:bg-gray-200:hover {
+  background-color: #e5e7eb;
+}
+
+.border-gray-300 {
+  border-color: #d1d5db;
+}
+
+.bg-green-500 {
+  background-color: #22c55e;
+}
+
+.hover\:bg-green-600:hover {
+  background-color: #16a34a;
+}
+
+.bg-yellow-500 {
+  background-color: #eab308;
+}
+
+.hover\:bg-yellow-600:hover {
+  background-color: #ca8a04;
+}
+
+.bg-red-500 {
+  background-color: #ef4444;
+}
+
+.hover\:bg-red-600:hover {
+  background-color: #dc2626;
+
 .disabled\:bg-gray-300:disabled {
   background-color: #d1d5db;
 }
@@ -538,6 +593,23 @@ code {
   }
 }
 
+/* 메인 레이아웃 그리드 강제 적용 - 2:1 비율 */
+@media (min-width: 1024px) {
+  .container > .grid {
+    display: grid !important;
+    grid-template-columns: 2fr 1fr !important;
+    gap: 1.5rem !important;
+  }
+  
+  .container > .grid > .lg\:col-span-2 {
+    grid-column: 1 !important;
+  }
+  
+  .container > .grid > .lg\:col-span-1 {
+    grid-column: 2 !important;
+  }
+}
+
 /* Step 6 특별 UI 스타일 */
 .space-y-4 > * + * {
   margin-top: 1rem;
@@ -557,4 +629,29 @@ code {
 
 .hover\:bg-orange-700:hover {
   background-color: #c2410c;
+}
+
+.progress-container {
+  display: flex;
+  flex-wrap: wrap;        /* 줄바꿈 허용 */
+  gap: 10px;
+  justify-content: center; /* 가운데 정렬 */
+}
+
+ul {
+  padding-left: 0;
+  margin-left: 0;
+  list-style: none;
+}
+
+ul li::before {
+  content: "• ";
+  margin-right: 6px;
+}
+
+/* 진행상황과 작성현황 나란히 배치 */
+@media (min-width: 1024px) {
+  .lg\:w-80 {
+    width: 20rem;
+  }
 }
