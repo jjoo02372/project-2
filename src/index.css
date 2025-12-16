@@ -456,6 +456,7 @@ code {
 
 .hover\:bg-red-600:hover {
   background-color: #dc2626;
+}
 
 .disabled\:bg-gray-300:disabled {
   background-color: #d1d5db;
