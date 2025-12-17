@@ -5,6 +5,8 @@ const STORAGE_KEY = 'science-inquiry-report';
 const API_KEY_STORAGE_KEY = 'openai-api-key';
 const API_STATUS_STORAGE_KEY = 'openai-api-status';
 const STUDENT_INFO_STORAGE_KEY = 'student-info';
+const SCIENCE_REPORTS_KEY = 'scienceReports';
+const TEACHER_DASHBOARD_DATA_KEY = 'teacherDashboardData';
 
 // Google Apps Script URL
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_PsbLZpDxaWZWA1zRcjLESqPV2ktxmYIvu4WdM7tHAFE8y-qIRmDgbdaQcvB9KYQexA/exec";
@@ -109,29 +111,31 @@ function saveStudentInfo() {
   localStorage.setItem(STUDENT_INFO_STORAGE_KEY, JSON.stringify(studentInfo));
 }
 
-// Submit all answers to teacher (모든 답변을 교사에게 제출)
-async function submitAllAnswersToTeacher() {
+// Submit all answers to teacher (모든 답변을 교사에게 제출) - localStorage 사용
+function submitAllAnswersToTeacher() {
   if (!studentInfo.studentId || !studentInfo.studentName) {
     alert('학생 정보를 먼저 입력해주세요.');
     return;
   }
   
   // 모든 단계의 답변 수집
-  const allAnswers = [];
+  const steps = {};
+  let completedSteps = 0;
+  
   stepGuides.forEach((step) => {
     const content = reportData[step.id] || '';
-    const textarea = document.querySelector(`textarea[data-step="${step.id}"]`);
-    const actualContent = textarea ? textarea.value : content;
+    const textarea = document.querySelector(`textarea[data-step-textarea="${step.id}"]`);
+    const actualContent = textarea ? textarea.value.trim() : content.trim();
     
-    if (actualContent.trim()) {
-      allAnswers.push({
-        step: `${step.id}. ${step.title}`,
-        answer: actualContent.trim()
-      });
+    if (actualContent) {
+      steps[step.id] = actualContent;
+      completedSteps++;
+    } else {
+      steps[step.id] = '';
     }
   });
   
-  if (allAnswers.length === 0) {
+  if (completedSteps === 0) {
     alert('제출할 답변이 없습니다. 먼저 보고서를 작성해주세요.');
     return;
   }
@@ -144,88 +148,55 @@ async function submitAllAnswersToTeacher() {
     submitBtn.textContent = '제출 중...';
     
     try {
-      console.log('Submitting all answers to teacher:', {
+      // 기존 데이터 로드
+      const existingData = JSON.parse(localStorage.getItem(TEACHER_DASHBOARD_DATA_KEY) || '{}');
+      
+      // 학생 데이터 생성
+      const studentData = {
         studentId: studentInfo.studentId,
         studentName: studentInfo.studentName,
-        answers: allAnswers
-      });
-      
-      // 각 단계별로 개별 요청 전송
-      const results = [];
-      for (const answerData of allAnswers) {
-        const stepNumber = parseInt(answerData.step.split('.')[0]); // "1. 탐구 주제" -> 1
-        const stepAnswer = answerData.answer;
-        
-        console.log(`Sending step ${stepNumber}:`, {
-          studentId: studentInfo.studentId,
-          studentName: studentInfo.studentName,
-          step: stepNumber,
-          answer: stepAnswer
-        });
-        
-        const res = await fetch(SCRIPT_URL, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify({
-            studentId: studentInfo.studentId,
-            studentName: studentInfo.studentName,
-            step: stepNumber,
-            answer: stepAnswer
-          }),
-        });
-        
-        const responseText = await res.text();
-        console.log(`Step ${stepNumber} response:`, responseText);
-        
-        let json;
-        try {
-          json = JSON.parse(responseText);
-        } catch (e) {
-          json = { message: responseText, ok: responseText.toLowerCase().includes('success') || responseText.toLowerCase().includes('ok') };
-        }
-        
-        results.push({
-          step: stepNumber,
-          success: json.ok || json.success,
-          response: json
-        });
-      }
-      
-      // 모든 요청 완료 후 결과 확인
-      const allSuccess = results.every(r => r.success);
-      const res = {
-        ok: allSuccess,
-        success: allSuccess,
-        results: results,
-        message: allSuccess ? '모든 단계가 성공적으로 제출되었습니다.' : '일부 단계 제출에 실패했습니다.'
+        step1: steps[1] || '',
+        step2: steps[2] || '',
+        step3: steps[3] || '',
+        step4: steps[4] || '',
+        step5: steps[5] || '',
+        step6: steps[6] || '',
+        step7: steps[7] || '',
+        step8: steps[8] || '',
+        step9: steps[9] || '',
+        completedSteps: completedSteps,
+        updatedAt: new Date().toISOString()
       };
       
+      // 같은 studentId면 덮어쓰기
+      existingData[studentInfo.studentId] = studentData;
+      
+      // localStorage에 저장
+      localStorage.setItem(TEACHER_DASHBOARD_DATA_KEY, JSON.stringify(existingData));
+      
+      console.log('Data saved to teacher dashboard:', studentData);
+      
       // 성공 메시지 표시
-      if (res.ok || res.success) {
-        submitBtn.textContent = '✓ 제출 완료';
-        submitBtn.style.backgroundColor = '#16a34a';
-        showResponseMessage('success', 
-          `교사에게 제출 완료!\n\n` +
-          `학생: ${studentInfo.studentName} (${studentInfo.studentId})\n` +
-          `제출된 단계: ${allAnswers.length}개\n\n` +
-          `응답: ${JSON.stringify(res, null, 2)}`
-        );
-        
-        setTimeout(() => {
-          submitBtn.textContent = originalText;
-          submitBtn.style.backgroundColor = '';
-          submitBtn.disabled = false;
-        }, 3000);
-      } else {
-        throw new Error(res.message || "제출 실패");
-      }
+      submitBtn.textContent = '✓ 제출 완료';
+      submitBtn.style.backgroundColor = '#16a34a';
+      showResponseMessage('success', 
+        `교사에게 제출 완료!\n\n` +
+        `학생: ${studentInfo.studentName} (${studentInfo.studentId})\n` +
+        `완료된 단계: ${completedSteps}/9개\n\n` +
+        `교사용 대시보드에서 확인할 수 있습니다.`
+      );
+      
+      setTimeout(() => {
+        submitBtn.textContent = originalText;
+        submitBtn.style.backgroundColor = '';
+        submitBtn.disabled = false;
+      }, 3000);
     } catch (error) {
       console.error('Failed to submit to teacher:', error);
       submitBtn.textContent = '✗ 제출 실패';
       submitBtn.style.backgroundColor = '#dc2626';
       showResponseMessage('error', 
-        `제출 실패: ${error.message}\n\n` +
-        `에러 상세: ${JSON.stringify(error, null, 2)}`
+        `제출 실패: ${error.message}`
       );
       
       setTimeout(() => {
@@ -293,11 +264,10 @@ async function saveToSheet({ studentId, studentName, step, answer }) {
 
 // Submit answer function - 저장 버튼 클릭 시 호출
 async function submitAnswer() {
-  const currentContent = reportData[currentStep] || '';
   const textarea = document.querySelector(`textarea[data-step-textarea="${currentStep}"]`);
-  const actualContent = textarea ? textarea.value : currentContent;
+  const actualContent = textarea ? textarea.value.trim() : (reportData[currentStep] || '').trim();
   
-  if (!actualContent.trim()) {
+  if (!actualContent) {
     alert('저장할 내용이 없습니다. 먼저 답변을 작성해주세요.');
     return;
   }
@@ -307,12 +277,18 @@ async function submitAnswer() {
     return;
   }
   
+  // reportData 업데이트 (중요!)
+  reportData[currentStep] = actualContent;
+  
   // 저장 버튼 비활성화 및 로딩 표시
   const saveBtn = document.getElementById('saveBtn');
   if (saveBtn) {
     const originalText = saveBtn.textContent;
     saveBtn.disabled = true;
     saveBtn.textContent = '저장 중...';
+    
+    // saveData 호출하여 reportData 저장
+    saveData();
     
     // localStorage에 학생별 데이터 저장 (교사용 대시보드를 위해)
     const studentKey = `student-${studentInfo.studentId}-${studentInfo.studentName}`;
@@ -324,6 +300,9 @@ async function submitAnswer() {
       lastUpdated: new Date().toISOString()
     };
     localStorage.setItem(studentKey, JSON.stringify(studentData));
+    
+    // Update scienceReports for teacher dashboard
+    updateScienceReports();
     
     // Apps Script로도 전송 (기존 기능 유지)
     const result = await saveToSheet({
@@ -409,6 +388,39 @@ function showResponseMessage(type, message) {
 }
 
 // Save data to localStorage
+// Update scienceReports for teacher dashboard
+function updateScienceReports() {
+  if (!studentInfo.studentId || !studentInfo.studentName) {
+    return;
+  }
+  
+  // Load existing scienceReports
+  const existingReports = JSON.parse(localStorage.getItem(SCIENCE_REPORTS_KEY) || '{}');
+  
+  // Create student key
+  const studentKey = `${studentInfo.studentId}|${studentInfo.studentName}`;
+  
+  // Build steps object (only non-empty steps)
+  const steps = {};
+  for (let i = 1; i <= 9; i++) {
+    const stepContent = reportData[i] || '';
+    if (stepContent.trim()) {
+      steps[i] = stepContent.trim();
+    }
+  }
+  
+  // Update or create student entry
+  existingReports[studentKey] = {
+    studentId: studentInfo.studentId,
+    studentName: studentInfo.studentName,
+    updatedAt: new Date().toISOString(),
+    steps: steps
+  };
+  
+  // Save back to localStorage
+  localStorage.setItem(SCIENCE_REPORTS_KEY, JSON.stringify(existingReports));
+}
+
 function saveData() {
   if (Object.keys(reportData).length > 0) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(reportData));
@@ -424,6 +436,9 @@ function saveData() {
         lastUpdated: new Date().toISOString()
       };
       localStorage.setItem(studentKey, JSON.stringify(studentData));
+      
+      // Update scienceReports
+      updateScienceReports();
     }
   }
 }
@@ -695,10 +710,20 @@ function showAPIKeySettings() {
 // Header Component
 function createHeader() {
   const header = document.createElement('header');
-  header.className = 'bg-gradient-to-r from-blue-600 to-purple-600 text-white py-6 shadow-lg';
+  header.className = 'bg-gradient-to-r from-blue-600 to-purple-600 text-white py-6 shadow-lg relative';
   
   const container = document.createElement('div');
   container.className = 'container mx-auto px-4';
+  
+  // 교사용 대시보드 버튼 (오른쪽 상단)
+  const teacherDashboardBtn = document.createElement('a');
+  teacherDashboardBtn.href = '/teacher-dashboard.html';
+  teacherDashboardBtn.className = 'teacher-dashboard-btn';
+  teacherDashboardBtn.style.position = 'absolute';
+  teacherDashboardBtn.style.top = '16px';
+  teacherDashboardBtn.style.right = '16px';
+  teacherDashboardBtn.style.zIndex = '10';
+  teacherDashboardBtn.innerHTML = '👨‍🏫 교사용 대시보드';
   
   const h1 = document.createElement('h1');
   h1.className = 'text-3xl font-bold text-center flex items-center justify-center gap-2';
@@ -711,6 +736,7 @@ function createHeader() {
   container.appendChild(h1);
   container.appendChild(p);
   header.appendChild(container);
+  header.appendChild(teacherDashboardBtn);
   
   return header;
 }
@@ -1574,8 +1600,9 @@ function createStep6GraphViewer() {
         const color = colors[datasetIdx % colors.length];
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
-        ctx.beginPath();
         
+        // 먼저 선을 그림
+        ctx.beginPath();
         dataset.data.forEach((value, idx) => {
           const x = padding + idx * stepX;
           const y = height - padding - (value / maxValue) * graphHeight;
@@ -1585,14 +1612,19 @@ function createStep6GraphViewer() {
           } else {
             ctx.lineTo(x, y);
           }
+        });
+        ctx.stroke();
+        
+        // 그 다음 점들을 그림
+        ctx.fillStyle = color;
+        dataset.data.forEach((value, idx) => {
+          const x = padding + idx * stepX;
+          const y = height - padding - (value / maxValue) * graphHeight;
           
-          ctx.fillStyle = color;
           ctx.beginPath();
           ctx.arc(x, y, 4, 0, Math.PI * 2);
           ctx.fill();
         });
-        
-        ctx.stroke();
       });
       
       ctx.fillStyle = '#000000';
@@ -1776,7 +1808,23 @@ function createAIAssistant() {
       if (chatHistory[currentStep].length === 0) {
         messages.push({
           role: 'system',
-          content: `당신은 과학 탐구 보고서 작성 도우미입니다. 사용자가 작성한 "${currentStepData.title}" 단계의 내용을 검토하고 개선 제안을 해주세요. 이전 대화 내용을 참고하여 맥락을 유지하며 대화를 이어가세요.`
+          content: `너는 초등/중학생을 돕는 친절한 과학탐구 도우미야.
+
+말투는 자연스럽고 짧게. 어려운 용어는 쓰지 말고, 쓰면 바로 뜻을 풀어줘.
+
+답은 항상 6~10문장 이내로.
+
+첫 문장: 공감/칭찬 1문장.
+그 다음: 핵심 설명 4~8문장.
+마지막: 학생에게 되묻는 질문 1개.
+
+중요:
+- 모르면 솔직히 "확실하진 않지만"이라고 말하고, 확인 방법을 제안해.
+- 정답만 주지 말고 학생이 스스로 생각하도록 힌트를 줘.
+- 주제는 '학교 과학탐구 보고서(탐구주제/가설/변인/실험방법/결과정리/결론)'에 관련된 것만 다뤄.
+- 그 외(일상잡담/정치/선정/폭력)는 정중히 거절하고 과학탐구로 다시 유도해.
+
+현재 "${currentStepData.title}" 단계의 내용을 검토하고 개선 제안을 해주세요. 이전 대화 내용을 참고하여 맥락을 유지하며 대화를 이어가세요.`
         });
       }
       

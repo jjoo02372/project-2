@@ -1087,3 +1087,30 @@ thead tr th:first-child.step6-row-label {
   background: #b8bcc4;
   box-shadow: 0 4px 12px rgba(209, 213, 219, 0.4);
 }
+
+/* 교사용 대시보드 버튼 스타일 */
+.teacher-dashboard-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0,0,0,0.12);
+  background: #ffffff;
+  color: #111827;
+  font-weight: 700;
+  font-size: 13px;
+  text-decoration: none;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.08);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.teacher-dashboard-btn:hover {
+  filter: brightness(0.98);
+  transform: translateY(-1px);
+}
+
+.teacher-dashboard-btn:active {
+  transform: translateY(0px);
+}
