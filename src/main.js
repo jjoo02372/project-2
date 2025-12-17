@@ -7,7 +7,7 @@ const API_STATUS_STORAGE_KEY = 'openai-api-status';
 const STUDENT_INFO_STORAGE_KEY = 'student-info';
 
 // Google Apps Script URL
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyVSconQklqXZjjQph-jmyGbCC0cn5-hoc0siBOFqxl-3030536YOkHcJ_3Wr2NQS51GA/exec";
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_PsbLZpDxaWZWA1zRcjLESqPV2ktxmYIvu4WdM7tHAFE8y-qIRmDgbdaQcvB9KYQexA/exec";
 
 // App State
 let currentStep = 1;
@@ -90,21 +90,291 @@ function saveStudentInfo() {
   localStorage.setItem(STUDENT_INFO_STORAGE_KEY, JSON.stringify(studentInfo));
 }
 
+// Submit all answers to teacher (모든 답변을 교사에게 제출)
+async function submitAllAnswersToTeacher() {
+  if (!studentInfo.studentId || !studentInfo.studentName) {
+    alert('학생 정보를 먼저 입력해주세요.');
+    return;
+  }
+  
+  // 모든 단계의 답변 수집
+  const allAnswers = [];
+  stepGuides.forEach((step) => {
+    const content = reportData[step.id] || '';
+    const textarea = document.querySelector(`textarea[data-step="${step.id}"]`);
+    const actualContent = textarea ? textarea.value : content;
+    
+    if (actualContent.trim()) {
+      allAnswers.push({
+        step: `${step.id}. ${step.title}`,
+        answer: actualContent.trim()
+      });
+    }
+  });
+  
+  if (allAnswers.length === 0) {
+    alert('제출할 답변이 없습니다. 먼저 보고서를 작성해주세요.');
+    return;
+  }
+  
+  // 제출 버튼 찾기 및 상태 변경
+  const submitBtn = document.getElementById('submitToTeacherBtn');
+  if (submitBtn) {
+    const originalText = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = '제출 중...';
+    
+    try {
+      console.log('Submitting all answers to teacher:', {
+        studentId: studentInfo.studentId,
+        studentName: studentInfo.studentName,
+        answers: allAnswers
+      });
+      
+      // 각 단계별로 개별 요청 전송
+      const results = [];
+      for (const answerData of allAnswers) {
+        const stepNumber = parseInt(answerData.step.split('.')[0]); // "1. 탐구 주제" -> 1
+        const stepAnswer = answerData.answer;
+        
+        console.log(`Sending step ${stepNumber}:`, {
+          studentId: studentInfo.studentId,
+          studentName: studentInfo.studentName,
+          step: stepNumber,
+          answer: stepAnswer
+        });
+        
+        const res = await fetch(SCRIPT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            studentId: studentInfo.studentId,
+            studentName: studentInfo.studentName,
+            step: stepNumber,
+            answer: stepAnswer
+          }),
+        });
+        
+        const responseText = await res.text();
+        console.log(`Step ${stepNumber} response:`, responseText);
+        
+        let json;
+        try {
+          json = JSON.parse(responseText);
+        } catch (e) {
+          json = { message: responseText, ok: responseText.toLowerCase().includes('success') || responseText.toLowerCase().includes('ok') };
+        }
+        
+        results.push({
+          step: stepNumber,
+          success: json.ok || json.success,
+          response: json
+        });
+      }
+      
+      // 모든 요청 완료 후 결과 확인
+      const allSuccess = results.every(r => r.success);
+      const res = {
+        ok: allSuccess,
+        success: allSuccess,
+        results: results,
+        message: allSuccess ? '모든 단계가 성공적으로 제출되었습니다.' : '일부 단계 제출에 실패했습니다.'
+      };
+      
+      // 성공 메시지 표시
+      if (res.ok || res.success) {
+        submitBtn.textContent = '✓ 제출 완료';
+        submitBtn.style.backgroundColor = '#16a34a';
+        showResponseMessage('success', 
+          `교사에게 제출 완료!\n\n` +
+          `학생: ${studentInfo.studentName} (${studentInfo.studentId})\n` +
+          `제출된 단계: ${allAnswers.length}개\n\n` +
+          `응답: ${JSON.stringify(res, null, 2)}`
+        );
+        
+        setTimeout(() => {
+          submitBtn.textContent = originalText;
+          submitBtn.style.backgroundColor = '';
+          submitBtn.disabled = false;
+        }, 3000);
+      } else {
+        throw new Error(res.message || "제출 실패");
+      }
+    } catch (error) {
+      console.error('Failed to submit to teacher:', error);
+      submitBtn.textContent = '✗ 제출 실패';
+      submitBtn.style.backgroundColor = '#dc2626';
+      showResponseMessage('error', 
+        `제출 실패: ${error.message}\n\n` +
+        `에러 상세: ${JSON.stringify(error, null, 2)}`
+      );
+      
+      setTimeout(() => {
+        submitBtn.textContent = originalText;
+        submitBtn.style.backgroundColor = '';
+        submitBtn.disabled = false;
+      }, 3000);
+    }
+  }
+}
+
 // Save data to Google Sheets
 async function saveToSheet({ studentId, studentName, step, answer }) {
   try {
+    console.log('Sending data to Google Apps Script:', { studentId, studentName, step, answer });
+    
     const res = await fetch(SCRIPT_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({ studentId, studentName, step, answer }),
     });
-    const json = await res.json();
-    if (!json.ok) throw new Error("save failed");
-    console.log('Data saved to Google Sheets successfully');
+    
+    console.log('Response status:', res.status);
+    console.log('Response headers:', res.headers);
+    
+    // 응답 텍스트 먼저 확인
+    const responseText = await res.text();
+    console.log('Response text:', responseText);
+    
+    // JSON 파싱 시도
+    let json;
+    try {
+      json = JSON.parse(responseText);
+      console.log('Parsed JSON response:', json);
+    } catch (e) {
+      // JSON이 아닌 경우 텍스트로 처리
+      console.log('Response is not JSON, treating as text');
+      if (responseText.toLowerCase().includes('success') || responseText.toLowerCase().includes('ok')) {
+        return { success: true, message: responseText, response: responseText };
+      }
+      return { success: false, message: responseText, response: responseText };
+    }
+    
+    // 응답 처리
+    if (json.ok || json.success) {
+      console.log('Data saved to Google Sheets successfully');
+      return { success: true, message: json.message || '저장되었습니다.', response: json };
+    } else {
+      throw new Error(json.message || json.error || "save failed");
+    }
   } catch (error) {
     console.error('Failed to save to Google Sheets:', error);
-    // 에러가 발생해도 앱은 계속 작동하도록 함
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    return { 
+      success: false, 
+      message: error.message || '저장에 실패했습니다.', 
+      error: error 
+    };
   }
+}
+
+// Submit answer function - 저장 버튼 클릭 시 호출
+async function submitAnswer() {
+  const currentContent = reportData[currentStep] || '';
+  const textarea = document.querySelector(`textarea[data-step="${currentStep}"]`);
+  const actualContent = textarea ? textarea.value : currentContent;
+  
+  if (!actualContent.trim()) {
+    alert('저장할 내용이 없습니다. 먼저 답변을 작성해주세요.');
+    return;
+  }
+  
+  if (!studentInfo.studentId || !studentInfo.studentName) {
+    alert('학생 정보를 먼저 입력해주세요.');
+    return;
+  }
+  
+  // 저장 버튼 비활성화 및 로딩 표시
+  const saveBtn = document.getElementById('saveBtn');
+  if (saveBtn) {
+    const originalText = saveBtn.textContent;
+    saveBtn.disabled = true;
+    saveBtn.textContent = '저장 중...';
+    
+    const result = await saveToSheet({
+      studentId: studentInfo.studentId,
+      studentName: studentInfo.studentName,
+      step: currentStep, // 숫자로 전송
+      answer: actualContent
+    });
+    
+    // 버튼 상태 복원
+    saveBtn.disabled = false;
+    
+    // 응답 메시지 표시
+    if (result.success) {
+      saveBtn.textContent = '✓ 저장 완료';
+      saveBtn.style.backgroundColor = '#16a34a';
+      
+      // Apps Script 응답 표시
+      showResponseMessage('success', `저장 성공!\n${result.message}\n\n응답: ${JSON.stringify(result.response, null, 2)}`);
+      
+      setTimeout(() => {
+        saveBtn.textContent = originalText;
+        saveBtn.style.backgroundColor = '';
+      }, 3000);
+    } else {
+      saveBtn.textContent = '✗ 저장 실패';
+      saveBtn.style.backgroundColor = '#dc2626';
+      
+      // 에러 메시지 표시
+      const errorMsg = result.error ? 
+        `저장 실패: ${result.message}\n\n에러: ${result.error.message || JSON.stringify(result.error)}` :
+        `저장 실패: ${result.message}`;
+      showResponseMessage('error', errorMsg);
+      
+      setTimeout(() => {
+        saveBtn.textContent = originalText;
+        saveBtn.style.backgroundColor = '';
+      }, 3000);
+    }
+  }
+}
+
+// Show response message from Apps Script
+function showResponseMessage(type, message) {
+  // 기존 메시지 제거
+  const existingMsg = document.getElementById('apps-script-response');
+  if (existingMsg) {
+    existingMsg.remove();
+  }
+  
+  // 새 메시지 생성
+  const msgDiv = document.createElement('div');
+  msgDiv.id = 'apps-script-response';
+  msgDiv.className = `fixed top-20 right-4 z-50 p-4 rounded-lg shadow-xl max-w-md ${
+    type === 'success' ? 'bg-green-50 border-2 border-green-500' : 'bg-red-50 border-2 border-red-500'
+  }`;
+  
+  const title = document.createElement('div');
+  title.className = `font-bold mb-2 ${type === 'success' ? 'text-green-800' : 'text-red-800'}`;
+  title.textContent = type === 'success' ? '✅ Apps Script 응답' : '❌ Apps Script 오류';
+  
+  const content = document.createElement('div');
+  content.className = `text-sm ${type === 'success' ? 'text-green-700' : 'text-red-700'} whitespace-pre-wrap`;
+  content.textContent = message;
+  
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'absolute top-2 right-2 text-gray-500 hover:text-gray-700';
+  closeBtn.innerHTML = '✕';
+  closeBtn.onclick = () => msgDiv.remove();
+  
+  msgDiv.appendChild(closeBtn);
+  msgDiv.appendChild(title);
+  msgDiv.appendChild(content);
+  
+  document.body.appendChild(msgDiv);
+  
+  // 10초 후 자동 제거
+  setTimeout(() => {
+    if (msgDiv.parentNode) {
+      msgDiv.remove();
+    }
+  }, 10000);
 }
 
 // Save data to localStorage
@@ -1456,30 +1726,39 @@ function createReportPreview() {
 // ExportButton Component
 function createExportButton() {
   const div = document.createElement('div');
-  div.className = 'bg-white rounded-lg shadow-md p-6 mb-6';
+  div.className = 'bg-white rounded-lg shadow-md p-6 sticky top-4';
   
   const h3 = document.createElement('h3');
   h3.className = 'text-xl font-semibold mb-4 text-gray-800';
   h3.textContent = '보고서 내보내기';
   
   const buttonContainer = document.createElement('div');
-  buttonContainer.className = 'flex gap-4';
+  buttonContainer.className = 'flex flex-row gap-3 flex-wrap';
+  
+  // 교사에게 제출 버튼
+  const submitToTeacherBtn = document.createElement('button');
+  submitToTeacherBtn.id = 'submitToTeacherBtn';
+  submitToTeacherBtn.className = 'flex-1 min-w-[200px] px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 font-semibold';
+  submitToTeacherBtn.innerHTML = '<span>📤</span> 교사에게 제출';
+  submitToTeacherBtn.addEventListener('click', submitAllAnswersToTeacher);
   
   const txtButton = document.createElement('button');
-  txtButton.className = 'px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2';
+  txtButton.className = 'flex-1 min-w-[150px] px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2';
   txtButton.innerHTML = '<span>📄</span> TXT 파일로 저장';
   
   const htmlButton = document.createElement('button');
-  htmlButton.className = 'px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2';
+  htmlButton.className = 'flex-1 min-w-[150px] px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2';
   htmlButton.innerHTML = '<span>🌐</span> HTML 파일로 저장';
   
   const hasContent = Object.values(reportData).some(content => content.trim());
   txtButton.disabled = !hasContent;
   htmlButton.disabled = !hasContent;
+  submitToTeacherBtn.disabled = !hasContent || !studentInfo.studentId || !studentInfo.studentName;
   
   txtButton.addEventListener('click', exportTXT);
   htmlButton.addEventListener('click', exportHTML);
   
+  buttonContainer.appendChild(submitToTeacherBtn);
   buttonContainer.appendChild(txtButton);
   buttonContainer.appendChild(htmlButton);
   
@@ -1672,11 +1951,10 @@ function handleContentChange(content) {
   
   // Google Sheets에 저장 (학생 정보가 있는 경우에만)
   if (studentInfo.studentId && studentInfo.studentName && content.trim()) {
-    const stepTitle = stepGuides.find(s => s.id === currentStep)?.title || `Step ${currentStep}`;
     saveToSheet({
       studentId: studentInfo.studentId,
       studentName: studentInfo.studentName,
-      step: `${currentStep}. ${stepTitle}`,
+      step: currentStep, // 숫자로 전송
       answer: content
     });
   }
@@ -1915,6 +2193,13 @@ function render() {
   stepCounter.className = 'text-gray-600 font-medium';
   stepCounter.textContent = `${currentStep} / ${stepGuides.length}`;
   
+  // 저장 버튼 추가
+  const saveBtn = document.createElement('button');
+  saveBtn.id = 'saveBtn';
+  saveBtn.className = 'px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors';
+  saveBtn.textContent = '💾 저장';
+  saveBtn.addEventListener('click', submitAnswer);
+  
   const nextButton = document.createElement('button');
   nextButton.className = 'px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors';
   nextButton.textContent = '다음 단계 →';
@@ -1923,6 +2208,7 @@ function render() {
   
   navigationDiv.appendChild(prevButton);
   navigationDiv.appendChild(stepCounter);
+  navigationDiv.appendChild(saveBtn);
   navigationDiv.appendChild(nextButton);
   
   leftColumn.appendChild(navigationDiv);
@@ -1935,10 +2221,20 @@ function render() {
   }
   
   // 작성현황
-  rightColumn.appendChild(createStatusSidebar());
+  const statusSidebar = createStatusSidebar();
+  rightColumn.appendChild(statusSidebar);
   
   // 보고서 내보내기
-  rightColumn.appendChild(createExportButton());
+  const exportButton = createExportButton();
+  // 작성현황의 높이를 고려하여 보고서 내보내기의 top 값을 동적으로 설정
+  setTimeout(() => {
+    if (statusSidebar && exportButton) {
+      const statusHeight = statusSidebar.offsetHeight;
+      const statusTop = 16; // top-4 = 1rem = 16px
+      exportButton.style.top = `${statusTop + statusHeight + 24}px`; // 작성현황 높이 + space-y-6 (1.5rem = 24px)
+    }
+  }, 0);
+  rightColumn.appendChild(exportButton);
   
   mainGrid.appendChild(leftColumn);
   mainGrid.appendChild(rightColumn);
@@ -1955,6 +2251,15 @@ function render() {
       preview.classList.add('preview-modal-overlay');
       document.body.appendChild(preview);
     }
+  }
+  
+  // 저장 버튼 이벤트 리스너 명시적으로 연결
+  const saveBtnElement = document.querySelector("#saveBtn");
+  if (saveBtnElement) {
+    // 기존 이벤트 리스너 제거 후 새로 추가 (중복 방지)
+    const newSaveBtn = saveBtnElement.cloneNode(true);
+    saveBtnElement.parentNode.replaceChild(newSaveBtn, saveBtnElement);
+    newSaveBtn.addEventListener("click", submitAnswer);
   }
 }
 

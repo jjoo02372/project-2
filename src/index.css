@@ -656,3 +656,24 @@ ul li::before {
     width: 20rem;
   }
 }
+
+/* Apps Script 응답 메시지 스타일 */
+.fixed {
+  position: fixed;
+}
+
+.top-20 {
+  top: 5rem;
+}
+
+.right-4 {
+  right: 1rem;
+}
+
+.z-50 {
+  z-index: 50;
+}
+
+.max-w-md {
+  max-width: 28rem;
+}
