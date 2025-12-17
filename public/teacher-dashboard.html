@@ -1,13 +1,15 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>교사 대시보드 - 과학 탐구 보고서</title>
-  <link rel="stylesheet" href="/src/teacher-dashboard.css">
-</head>
-<body>
-  <div id="teacher-dashboard-app"></div>
-  <script type="module" src="/src/teacher-dashboard.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>교사 대시보드</title>
+    <link rel="stylesheet" href="/src/teacher-dashboard.css">
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <!-- ✅ public 안의 js를 불러야 배포에서도 동작 -->
+    <script src="/teacher-dashboard.js"></script>
+  </body>
 </html>

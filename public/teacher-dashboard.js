@@ -1,612 +1,501 @@
-import { stepGuides } from '../src/data/stepGuides.js';
-import '../src/index.css';
+// Step Guides Data (inline)
+const stepGuides = [
+  { id: 1, title: '탐구 주제', icon: '🔍' },
+  { id: 2, title: '탐구 동기', icon: '💭' },
+  { id: 3, title: '탐구 목적', icon: '🎯' },
+  { id: 4, title: '이론적 배경', icon: '📚' },
+  { id: 5, title: '탐구 방법', icon: '🧪' },
+  { id: 6, title: '결과 정리', icon: '📊' },
+  { id: 7, title: '결론 및 보완점', icon: '✅' },
+  { id: 8, title: '느낀 점', icon: '💝' },
+  { id: 9, title: '참고 문헌', icon: '📖' }
+];
 
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_PsbLZpDxaWZWA1zRcjLESqPV2ktxmYIvu4WdM7tHAFE8y-qIRmDgbdaQcvB9KYQexA/exec";
+const TEACHER_DASHBOARD_DATA_KEY = 'teacherDashboardData';
+const DEV = true; // 개발 모드 플래그
 
-// Teacher Dashboard State
-let allSubmissions = [];
-let selectedStudent = null;
-let searchQuery = '';
+// Dashboard State
+let currentView = 'list'; // 'list' or 'detail'
+let selectedStudentKey = null;
+let scienceReports = {};
 
-// Load submissions from Google Sheets
-async function loadSubmissions() {
+// Load teacher dashboard data from localStorage
+function loadTeacherDashboardData() {
   try {
-    console.log('Loading submissions from:', SCRIPT_URL);
+    console.log('=== Teacher Dashboard Debug ===');
+    console.log('All localStorage keys:', Object.keys(localStorage));
     
-    // Google Apps Script는 POST 요청으로 처리하는 것이 안정적
-    // Apps Script의 doPost 함수에서 action 파라미터를 확인하도록 요청
-    const res = await fetch(SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: 'getAll' })
-    });
+    const data = localStorage.getItem(TEACHER_DASHBOARD_DATA_KEY);
+    console.log('Looking for key:', TEACHER_DASHBOARD_DATA_KEY);
+    console.log('Found data:', data ? 'Yes' : 'No');
     
-    console.log('Response status:', res.status);
-    console.log('Response ok:', res.ok);
-    
-    // 응답 텍스트 먼저 확인
-    const responseText = await res.text();
-    console.log('Response text:', responseText);
-    
-    // JSON 파싱 시도
-    let data;
-    try {
-      data = JSON.parse(responseText);
-      console.log('Parsed JSON data:', data);
-    } catch (e) {
-      // JSON이 아닌 경우 처리
-      console.log('Response is not JSON, treating as text');
-      if (responseText.toLowerCase().includes('error') || responseText.toLowerCase().includes('fail')) {
-        throw new Error('Apps Script returned error: ' + responseText);
-      }
-      // 빈 응답이거나 다른 형식인 경우
-      data = { submissions: [] };
-    }
-    
-    // 데이터가 배열인 경우와 객체인 경우 모두 처리
-    let submissionsArray = [];
-    if (Array.isArray(data)) {
-      submissionsArray = data;
-    } else if (data.submissions && Array.isArray(data.submissions)) {
-      submissionsArray = data.submissions;
-    } else if (data.submissions && !Array.isArray(data.submissions)) {
-      // 단일 객체인 경우 배열로 변환
-      submissionsArray = [data.submissions];
-    } else {
-      submissionsArray = [];
-    }
-    
-    console.log('Submissions array:', submissionsArray);
-    
-    // 데이터를 학생별로 그룹화
-    const studentMap = {};
-    submissionsArray.forEach(submission => {
-      if (!submission || !submission.studentId || !submission.studentName) {
-        console.warn('Invalid submission data:', submission);
-        return;
-      }
+    if (data) {
+      const rawData = JSON.parse(data);
+      console.log('Raw data:', rawData);
       
-      const key = `${submission.studentId}_${submission.studentName}`;
-      if (!studentMap[key]) {
-        studentMap[key] = {
-          studentId: submission.studentId,
-          studentName: submission.studentName,
-          submissions: [],
-          submittedAt: submission.submittedAt || new Date().toISOString()
+      // 데이터 구조 변환: { studentId: {...} } -> { studentId|studentName: {...} }
+      scienceReports = {};
+      Object.keys(rawData).forEach(studentId => {
+        const student = rawData[studentId];
+        const studentKey = `${student.studentId}|${student.studentName}`;
+        
+        // steps 객체로 변환
+        const steps = {};
+        for (let i = 1; i <= 9; i++) {
+          const stepKey = `step${i}`;
+          if (student[stepKey] && student[stepKey].trim()) {
+            steps[i] = student[stepKey].trim();
+          }
+        }
+        
+        scienceReports[studentKey] = {
+          studentId: student.studentId,
+          studentName: student.studentName,
+          updatedAt: student.updatedAt,
+          completedSteps: student.completedSteps || Object.keys(steps).length,
+          steps: steps
         };
-      }
-      studentMap[key].submissions.push({
-        step: submission.step,
-        answer: submission.answer,
-        submittedAt: submission.submittedAt
       });
-    });
-    
-    allSubmissions = Object.values(studentMap);
-    
-    // 제출 시각 기준으로 정렬 (최신순)
-    allSubmissions.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt));
-    
-    console.log('Loaded submissions:', allSubmissions);
-    renderDashboard();
+      
+      console.log('Converted scienceReports:', scienceReports);
+      console.log('Student count:', Object.keys(scienceReports).length);
+    } else {
+      scienceReports = {};
+      console.log('No data found in teacherDashboardData');
+    }
   } catch (error) {
-    console.error('Failed to load submissions:', error);
-    console.error('Error details:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
-    });
-    
-    // 에러 메시지 표시
-    const app = document.getElementById('teacher-dashboard-app');
-    if (app && !app.querySelector('.connection-error')) {
-      const errorDiv = document.createElement('div');
-      errorDiv.className = 'connection-error bg-red-50 border-2 border-red-300 rounded-lg p-4 mb-4';
-      errorDiv.innerHTML = `
-        <div class="text-red-800 font-semibold mb-2">⚠️ Apps Script 연결 오류</div>
-        <div class="text-red-700 text-sm mb-2">${error.message}</div>
-        <div class="text-red-600 text-xs mb-2">Apps Script URL: ${SCRIPT_URL}</div>
-        <div class="text-red-600 text-xs mb-2">Apps Script에서 doPost 함수가 action='getAll'을 처리하도록 설정되어 있는지 확인해주세요.</div>
-        <button onclick="location.reload()" class="mt-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">
-          🔄 다시 시도
-        </button>
-      `;
-      const container = app.querySelector('.container') || app;
-      container.insertBefore(errorDiv, container.firstChild);
-    }
-    
-    // 연결 실패 시 빈 배열로 초기화
-    allSubmissions = [];
-    renderDashboard();
+    console.error('Failed to load teacher dashboard data:', error);
+    scienceReports = {};
   }
 }
 
-// Save evaluation to Google Sheets
-async function saveEvaluation(studentId, studentName, evaluation) {
-  try {
-    const res = await fetch(SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'saveEvaluation',
-        studentId: studentId,
-        studentName: studentName,
-        evaluation: evaluation
-      })
-    });
-    
-    const responseText = await res.text();
-    let json;
-    try {
-      json = JSON.parse(responseText);
-    } catch (e) {
-      json = { ok: responseText.toLowerCase().includes('success') || responseText.toLowerCase().includes('ok') };
-    }
-    
-    return json.ok || json.success;
-  } catch (error) {
-    console.error('Failed to save evaluation:', error);
-    return false;
-  }
+// Get student count
+function getStudentCount() {
+  return Object.keys(scienceReports).length;
 }
 
-// Render teacher dashboard
-function renderDashboard() {
-  const app = document.getElementById('teacher-dashboard-app');
-  app.innerHTML = '';
-  
-  const mainDiv = document.createElement('div');
-  mainDiv.className = 'min-h-screen bg-gray-100';
-  
-  // Header
-  const header = document.createElement('header');
-  header.className = 'bg-gradient-to-r from-purple-600 to-pink-600 text-white py-6 shadow-lg';
-  
-  const headerContainer = document.createElement('div');
-  headerContainer.className = 'container mx-auto px-4';
-  
-  const headerContent = document.createElement('div');
-  headerContent.className = 'flex items-center justify-between';
-  
-  const h1 = document.createElement('h1');
-  h1.className = 'text-3xl font-bold flex items-center gap-2';
-  h1.innerHTML = '<span>👨‍🏫</span> 교사 대시보드';
-  
-  const buttonGroup = document.createElement('div');
-  buttonGroup.className = 'flex items-center gap-2';
-  
-  const refreshBtn = document.createElement('button');
-  refreshBtn.className = 'px-4 py-2 bg-white bg-opacity-20 hover:bg-opacity-30 text-white rounded-lg transition-colors';
-  refreshBtn.textContent = '🔄 새로고침';
-  refreshBtn.addEventListener('click', () => {
-    loadSubmissions();
-  });
-  
-  const backBtn = document.createElement('button');
-  backBtn.className = 'px-4 py-2 bg-white bg-opacity-20 hover:bg-opacity-30 text-white rounded-lg transition-colors';
-  backBtn.textContent = '← 학생 페이지로';
-  backBtn.addEventListener('click', () => {
-    window.location.href = '/';
-  });
-  
-  buttonGroup.appendChild(refreshBtn);
-  buttonGroup.appendChild(backBtn);
-  
-  headerContent.appendChild(h1);
-  headerContent.appendChild(buttonGroup);
-  headerContainer.appendChild(headerContent);
-  
-  const p = document.createElement('p');
-  p.className = 'text-center mt-2 text-purple-100';
-  p.textContent = '학생 제출 현황 및 답변 평가';
-  headerContainer.appendChild(p);
-  
-  header.appendChild(headerContainer);
-  mainDiv.appendChild(header);
-  
-  const container = document.createElement('div');
-  container.className = 'container mx-auto px-4 py-8';
-  
-  if (selectedStudent) {
-    // Show student detail view
-    const detailView = createStudentDetailView(selectedStudent);
-    container.appendChild(detailView);
-  } else {
-    // Show student list
-    const searchSection = document.createElement('div');
-    searchSection.className = 'bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg shadow-md p-4 mb-6 border-2 border-purple-200';
-    
-    const searchInput = document.createElement('input');
-    searchInput.type = 'text';
-    searchInput.placeholder = '학생 ID 또는 이름으로 검색...';
-    searchInput.className = 'w-full px-4 py-2 border-2 border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white text-gray-700 placeholder-purple-400';
-    searchInput.value = searchQuery;
-    searchInput.addEventListener('input', (e) => {
-      searchQuery = e.target.value.toLowerCase();
-      renderDashboard();
-    });
-    
-    searchSection.appendChild(searchInput);
-    container.appendChild(searchSection);
-    
-    // Statistics
-    const statsSection = document.createElement('div');
-    statsSection.className = 'grid grid-cols-1 md:grid-cols-3 gap-4 mb-6';
-    
-    const filteredStudents = searchQuery 
-      ? allSubmissions.filter(s => 
-          s.studentId.toLowerCase().includes(searchQuery) || 
-          s.studentName.toLowerCase().includes(searchQuery)
-        )
-      : allSubmissions;
-    
-    const totalStudents = document.createElement('div');
-    totalStudents.className = 'bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg shadow-md p-6 border-2 border-purple-200';
-    totalStudents.innerHTML = `
-      <div class="text-purple-700 text-sm mb-2 font-semibold">전체 학생</div>
-      <div class="text-3xl font-bold text-purple-600">${filteredStudents.length}</div>
-    `;
-    
-    const totalSubmissions = document.createElement('div');
-    totalSubmissions.className = 'bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg shadow-md p-6 border-2 border-blue-200';
-    const totalSteps = filteredStudents.reduce((sum, s) => sum + s.submissions.length, 0);
-    totalSubmissions.innerHTML = `
-      <div class="text-blue-700 text-sm mb-2 font-semibold">전체 제출</div>
-      <div class="text-3xl font-bold text-blue-600">${totalSteps}</div>
-    `;
-    
-    const avgCompletion = document.createElement('div');
-    avgCompletion.className = 'bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg shadow-md p-6 border-2 border-green-200';
-    const avgSteps = filteredStudents.length > 0 ? (totalSteps / filteredStudents.length).toFixed(1) : 0;
-    avgCompletion.innerHTML = `
-      <div class="text-green-700 text-sm mb-2 font-semibold">평균 완성 단계</div>
-      <div class="text-3xl font-bold text-green-600">${avgSteps}</div>
-    `;
-    
-    statsSection.appendChild(totalStudents);
-    statsSection.appendChild(totalSubmissions);
-    statsSection.appendChild(avgCompletion);
-    container.appendChild(statsSection);
-    
-    const studentList = createStudentList(filteredStudents);
-    container.appendChild(studentList);
-    
-    // Looker Studio iframe 추가
-    const lookerSection = document.createElement('div');
-    lookerSection.className = 'mt-6 bg-white rounded-lg shadow-md p-4 border-2 border-purple-200';
-    
-    const lookerTitle = document.createElement('h2');
-    lookerTitle.className = 'text-2xl font-bold mb-4 text-purple-800';
-    lookerTitle.textContent = '📊 데이터 분석 대시보드';
-    lookerSection.appendChild(lookerTitle);
-    
-    const lookerIframe = document.createElement('iframe');
-    lookerIframe.src = '(Looker Studio 임베드 URL)'; // 여기에 실제 Looker Studio URL을 입력하세요
-    lookerIframe.style.width = '100%';
-    lookerIframe.style.height = '100vh';
-    lookerIframe.style.border = '0';
-    lookerIframe.style.minHeight = '600px';
-    lookerIframe.setAttribute('allowfullscreen', '');
-    
-    lookerSection.appendChild(lookerIframe);
-    container.appendChild(lookerSection);
-  }
-  
-  mainDiv.appendChild(container);
-  app.appendChild(mainDiv);
+// Get completed steps count for a student
+function getCompletedStepsCount(studentKey) {
+  const student = scienceReports[studentKey];
+  if (!student) return 0;
+  return student.completedSteps || (student.steps ? Object.keys(student.steps).length : 0);
 }
 
-// Create student list view
-function createStudentList(students) {
-  const listDiv = document.createElement('div');
-  listDiv.className = 'bg-gradient-to-br from-white to-purple-50 rounded-lg shadow-md p-6 border-2 border-purple-200';
-  
-  const h2 = document.createElement('h2');
-  h2.className = 'text-2xl font-bold mb-4 text-purple-800';
-  h2.textContent = `학생 목록 (${students.length}명)`;
-  listDiv.appendChild(h2);
-  
-  if (students.length === 0) {
-    const emptyMsg = document.createElement('p');
-    emptyMsg.className = 'text-gray-500 text-center py-8';
-    emptyMsg.textContent = '제출된 학생이 없습니다.';
-    listDiv.appendChild(emptyMsg);
-    return listDiv;
-  }
-  
-  const table = document.createElement('table');
-  table.className = 'w-full';
-  
-  // Table header
-  const thead = document.createElement('thead');
-  thead.className = 'bg-gradient-to-r from-purple-100 to-pink-100';
-  const headerRow = document.createElement('tr');
-  ['학생 이름', '제출 개수', '완성도', '제출 시각', '작업'].forEach(header => {
-    const th = document.createElement('th');
-    th.className = 'px-4 py-3 text-left text-xs font-medium text-purple-700 uppercase tracking-wider';
-    th.textContent = header;
-    headerRow.appendChild(th);
-  });
-  thead.appendChild(headerRow);
-  table.appendChild(thead);
-  
-  // Table body
-  const tbody = document.createElement('tbody');
-  tbody.className = 'bg-white divide-y divide-gray-200';
-  
-  students.forEach(student => {
-    const row = document.createElement('tr');
-    row.className = 'hover:bg-gray-50';
-    
-    // Student Name
-    const nameCell = document.createElement('td');
-    nameCell.className = 'px-4 py-4 whitespace-nowrap text-sm font-semibold text-purple-800';
-    nameCell.textContent = `${student.studentName} (${student.studentId})`;
-    row.appendChild(nameCell);
-    
-    // Submission Count
-    const countCell = document.createElement('td');
-    countCell.className = 'px-4 py-4 whitespace-nowrap text-sm font-medium text-blue-700';
-    const stepCount = student.submissions.length;
-    const percentage = Math.round((stepCount / stepGuides.length) * 100);
-    countCell.textContent = `${stepCount} / ${stepGuides.length} (${percentage}%)`;
-    row.appendChild(countCell);
-    
-    // Progress bar
-    const progressCell = document.createElement('td');
-    progressCell.className = 'px-4 py-4 whitespace-nowrap';
-    const progressBar = document.createElement('div');
-    progressBar.className = 'w-full bg-purple-100 rounded-full h-3';
-    const progressFill = document.createElement('div');
-    progressFill.className = 'bg-gradient-to-r from-purple-400 to-pink-400 h-3 rounded-full transition-all';
-    progressFill.style.width = `${percentage}%`;
-    progressBar.appendChild(progressFill);
-    progressCell.appendChild(progressBar);
-    row.appendChild(progressCell);
-    
-    // Last Submission
-    const dateCell = document.createElement('td');
-    dateCell.className = 'px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-700';
-    if (student.submittedAt) {
-      const date = new Date(student.submittedAt);
-      dateCell.textContent = date.toLocaleString('ko-KR');
-    } else {
-      dateCell.textContent = '-';
+// Generate sample data for testing
+function generateSampleData() {
+  const sampleData = {
+    '101': {
+      studentId: '101',
+      studentName: '김철수',
+      step1: '식물의 광합성에 미치는 빛의 색깔의 영향에 대해 탐구하고자 합니다.',
+      step2: '일상생활에서 식물을 키우다가 빛의 색깔이 성장에 영향을 미칠 수 있다는 생각이 들었습니다.',
+      step3: '빛의 색깔에 따라 식물의 광합성 속도가 달라질 것이다.',
+      step4: '독립변인: 빛의 색깔(빨강, 파랑, 초록), 종속변인: 식물의 성장 속도, 통제변인: 온도, 물의 양, 식물 종류',
+      step5: '같은 종류의 식물 3개를 준비하고, 각각 다른 색깔의 필터를 씌워 2주간 관찰합니다.',
+      step6: '빨강 필터: 5cm 성장, 파랑 필터: 7cm 성장, 초록 필터: 3cm 성장',
+      step7: '파랑 빛에서 가장 빠르게 성장했고, 초록 빛에서 가장 느리게 성장했습니다.',
+      step8: '파랑 빛이 식물의 광합성에 가장 효과적이며, 초록 빛은 식물이 흡수하기 어려운 빛입니다.',
+      step9: '실험 결과를 바탕으로 식물 재배 시 적절한 빛의 색깔을 선택하는 것이 중요함을 알 수 있습니다.',
+      completedSteps: 9,
+      updatedAt: new Date().toISOString()
+    },
+    '102': {
+      studentId: '102',
+      studentName: '이영희',
+      step1: '물의 온도가 얼음이 얼 때까지 걸리는 시간에 미치는 영향',
+      step2: '겨울에 물이 얼 때 온도에 따라 얼음이 얼 때까지 걸리는 시간이 다를 것 같아서 궁금했습니다.',
+      step3: '물의 온도가 낮을수록 얼음이 얼 때까지 걸리는 시간이 짧아질 것이다.',
+      step4: '독립변인: 물의 초기 온도, 종속변인: 얼음이 얼 때까지 걸리는 시간',
+      step5: '다양한 온도의 물을 준비하여 냉동실에 넣고 시간을 측정합니다.',
+      step6: '20도: 2시간, 10도: 1시간, 5도: 30분',
+      step7: '온도가 낮을수록 더 빨리 얼었습니다.',
+      step8: '물의 초기 온도가 낮을수록 얼음이 되는 데 걸리는 시간이 짧아집니다.',
+      step9: '실험을 통해 온도와 상태 변화의 관계를 이해할 수 있었습니다.',
+      completedSteps: 9,
+      updatedAt: new Date(Date.now() - 3600000).toISOString()
+    },
+    '103': {
+      studentId: '103',
+      studentName: '박민수',
+      step1: '탄산음료의 종류에 따른 이산화탄소 발생량 비교',
+      step2: '탄산음료를 마시다가 종류에 따라 탄산의 양이 다른 것 같아서 궁금했습니다.',
+      step3: '탄산음료의 종류에 따라 이산화탄소 발생량이 다를 것이다.',
+      step4: '독립변인: 탄산음료 종류, 종속변인: 이산화탄소 발생량',
+      step5: '다양한 탄산음료를 준비하고 각각에서 발생하는 이산화탄소를 측정합니다.',
+      step6: '',
+      step7: '',
+      step8: '',
+      step9: '',
+      completedSteps: 5,
+      updatedAt: new Date(Date.now() - 7200000).toISOString()
     }
-    row.appendChild(dateCell);
-    
-    // Actions
-    const actionCell = document.createElement('td');
-    actionCell.className = 'px-4 py-4 whitespace-nowrap text-sm font-medium';
-    const viewBtn = document.createElement('button');
-    viewBtn.className = 'px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all shadow-md';
-    viewBtn.textContent = '상세보기';
-    viewBtn.addEventListener('click', () => {
-      selectedStudent = student;
-      renderDashboard();
-    });
-    actionCell.appendChild(viewBtn);
-    row.appendChild(actionCell);
-    
-    tbody.appendChild(row);
-  });
-  
-  table.appendChild(tbody);
-  listDiv.appendChild(table);
-  
-  return listDiv;
-}
-
-// Create student detail view
-function createStudentDetailView(student) {
-  const detailDiv = document.createElement('div');
-  detailDiv.className = 'bg-gradient-to-br from-white to-purple-50 rounded-lg shadow-md p-6 border-2 border-purple-200';
-  
-  // Header with back button
-  const headerDiv = document.createElement('div');
-  headerDiv.className = 'flex items-center justify-between mb-6';
-  
-  const titleDiv = document.createElement('div');
-  const h2 = document.createElement('h2');
-  h2.className = 'text-2xl font-bold text-purple-800';
-  h2.textContent = `${student.studentName} (${student.studentId})`;
-  titleDiv.appendChild(h2);
-  
-  const backBtn = document.createElement('button');
-  backBtn.className = 'px-4 py-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-colors shadow-md';
-  backBtn.textContent = '← 목록으로';
-  backBtn.addEventListener('click', () => {
-    selectedStudent = null;
-    renderDashboard();
-  });
-  
-  headerDiv.appendChild(titleDiv);
-  headerDiv.appendChild(backBtn);
-  detailDiv.appendChild(headerDiv);
-  
-  // Student submissions by step
-  const submissionsContainer = document.createElement('div');
-  submissionsContainer.className = 'mb-6';
-  
-  stepGuides.forEach(step => {
-    const stepDiv = document.createElement('div');
-    stepDiv.className = 'mb-6 p-4 border-2 border-purple-200 rounded-lg bg-gradient-to-r from-white to-purple-50';
-    
-    const stepHeader = document.createElement('div');
-    stepHeader.className = 'flex items-center justify-between mb-2';
-    
-    const stepTitle = document.createElement('h3');
-    stepTitle.className = 'text-lg font-semibold text-purple-800';
-    stepTitle.innerHTML = `<span>${step.icon || '📝'}</span> ${step.id}. ${step.title}`;
-    stepHeader.appendChild(stepTitle);
-    
-    const submission = student.submissions.find(s => s.step === step.id);
-    if (submission) {
-      const statusBadge = document.createElement('span');
-      statusBadge.className = 'px-3 py-1 bg-gradient-to-r from-green-200 to-emerald-200 text-green-800 text-xs font-semibold rounded-full border border-green-300';
-      statusBadge.textContent = '제출됨';
-      stepHeader.appendChild(statusBadge);
-    } else {
-      const statusBadge = document.createElement('span');
-      statusBadge.className = 'px-3 py-1 bg-gradient-to-r from-gray-200 to-gray-300 text-gray-700 text-xs font-semibold rounded-full border border-gray-400';
-      statusBadge.textContent = '미제출';
-      stepHeader.appendChild(statusBadge);
-    }
-    
-    stepDiv.appendChild(stepHeader);
-    
-    if (submission && submission.answer) {
-      const answerDiv = document.createElement('div');
-      answerDiv.className = 'mt-2 p-3 bg-white rounded-lg text-gray-700 whitespace-pre-wrap border border-purple-200 shadow-sm';
-      answerDiv.textContent = submission.answer;
-      stepDiv.appendChild(answerDiv);
-    } else {
-      const noAnswer = document.createElement('p');
-      noAnswer.className = 'text-purple-400 italic mt-2 font-medium';
-      noAnswer.textContent = '답변이 제출되지 않았습니다.';
-      stepDiv.appendChild(noAnswer);
-    }
-    
-    submissionsContainer.appendChild(stepDiv);
-  });
-  
-  detailDiv.appendChild(submissionsContainer);
-  
-  // Evaluation Section
-  const evaluationDiv = document.createElement('div');
-  evaluationDiv.className = 'border-t pt-6 mt-6';
-  
-  const evalTitle = document.createElement('h3');
-  evalTitle.className = 'text-xl font-bold text-purple-800 mb-4';
-  evalTitle.textContent = '📊 평가';
-  evaluationDiv.appendChild(evalTitle);
-  
-  // Evaluation form
-  const evalForm = document.createElement('div');
-  evalForm.className = 'space-y-4';
-  
-  // 과학성 (50점)
-  const scienceDiv = document.createElement('div');
-  scienceDiv.className = 'mb-4';
-  const scienceLabel = document.createElement('label');
-  scienceLabel.className = 'block text-sm font-semibold text-purple-700 mb-2';
-  scienceLabel.textContent = '과학성 (50점)';
-  const scienceInput = document.createElement('input');
-  scienceInput.type = 'number';
-  scienceInput.min = '0';
-  scienceInput.max = '50';
-  scienceInput.value = '0';
-  scienceInput.className = 'w-full px-3 py-2 border-2 border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white text-gray-700';
-  scienceInput.id = 'eval-science';
-  scienceDiv.appendChild(scienceLabel);
-  scienceDiv.appendChild(scienceInput);
-  evalForm.appendChild(scienceDiv);
-  
-  // 논리성 (30점)
-  const logicDiv = document.createElement('div');
-  logicDiv.className = 'mb-4';
-  const logicLabel = document.createElement('label');
-  logicLabel.className = 'block text-sm font-semibold text-blue-700 mb-2';
-  logicLabel.textContent = '논리성 (30점)';
-  const logicInput = document.createElement('input');
-  logicInput.type = 'number';
-  logicInput.min = '0';
-  logicInput.max = '30';
-  logicInput.value = '0';
-  logicInput.className = 'w-full px-3 py-2 border-2 border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-700';
-  logicInput.id = 'eval-logic';
-  logicDiv.appendChild(logicLabel);
-  logicDiv.appendChild(logicInput);
-  evalForm.appendChild(logicDiv);
-  
-  // 창의적 아이디어 (20점)
-  const creativityDiv = document.createElement('div');
-  creativityDiv.className = 'mb-4';
-  const creativityLabel = document.createElement('label');
-  creativityLabel.className = 'block text-sm font-semibold text-pink-700 mb-2';
-  creativityLabel.textContent = '창의적 아이디어 (20점)';
-  const creativityInput = document.createElement('input');
-  creativityInput.type = 'number';
-  creativityInput.min = '0';
-  creativityInput.max = '20';
-  creativityInput.value = '0';
-  creativityInput.className = 'w-full px-3 py-2 border-2 border-pink-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-pink-500 bg-white text-gray-700';
-  creativityInput.id = 'eval-creativity';
-  creativityDiv.appendChild(creativityLabel);
-  creativityDiv.appendChild(creativityInput);
-  evalForm.appendChild(creativityDiv);
-  
-  // Total score display
-  const totalDiv = document.createElement('div');
-  totalDiv.className = 'mb-4 p-4 bg-gradient-to-r from-purple-100 to-pink-100 rounded-lg border-2 border-purple-300';
-  const totalLabel = document.createElement('div');
-  totalLabel.className = 'text-sm font-semibold text-purple-700 mb-1';
-  totalLabel.textContent = '총점';
-  const totalScore = document.createElement('div');
-  totalScore.className = 'text-3xl font-bold text-purple-600';
-  totalScore.id = 'eval-total';
-  totalScore.textContent = '0 / 100';
-  
-  const updateTotal = () => {
-    const science = parseInt(scienceInput.value) || 0;
-    const logic = parseInt(logicInput.value) || 0;
-    const creativity = parseInt(creativityInput.value) || 0;
-    const total = science + logic + creativity;
-    totalScore.textContent = `${total} / 100`;
   };
   
-  scienceInput.addEventListener('input', updateTotal);
-  logicInput.addEventListener('input', updateTotal);
-  creativityInput.addEventListener('input', updateTotal);
-  
-  totalDiv.appendChild(totalLabel);
-  totalDiv.appendChild(totalScore);
-  evalForm.appendChild(totalDiv);
-  
-  // Save button
-  const saveBtn = document.createElement('button');
-  saveBtn.className = 'w-full px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg hover:from-purple-600 hover:to-pink-600 transition-all font-semibold shadow-md';
-  saveBtn.textContent = '💾 평가 저장';
-  saveBtn.addEventListener('click', async () => {
-    const evaluation = {
-      science: parseInt(scienceInput.value) || 0,
-      logic: parseInt(logicInput.value) || 0,
-      creativity: parseInt(creativityInput.value) || 0,
-      total: parseInt(scienceInput.value || 0) + parseInt(logicInput.value || 0) + parseInt(creativityInput.value || 0),
-      evaluatedAt: new Date().toISOString()
-    };
-    
-    saveBtn.disabled = true;
-    saveBtn.textContent = '저장 중...';
-    
-    const success = await saveEvaluation(student.studentId, student.studentName, evaluation);
-    
-    if (success) {
-      saveBtn.textContent = '✓ 저장 완료';
-      saveBtn.style.backgroundColor = '#16a34a';
-      setTimeout(() => {
-        saveBtn.textContent = '💾 평가 저장';
-        saveBtn.style.backgroundColor = '';
-        saveBtn.disabled = false;
-      }, 2000);
-    } else {
-      saveBtn.textContent = '저장 실패';
-      saveBtn.style.backgroundColor = '#dc2626';
-      setTimeout(() => {
-        saveBtn.textContent = '💾 평가 저장';
-        saveBtn.style.backgroundColor = '';
-        saveBtn.disabled = false;
-      }, 2000);
-    }
-  });
-  evalForm.appendChild(saveBtn);
-  
-  evaluationDiv.appendChild(evalForm);
-  detailDiv.appendChild(evaluationDiv);
-  
-  return detailDiv;
+  localStorage.setItem(TEACHER_DASHBOARD_DATA_KEY, JSON.stringify(sampleData));
+  console.log('Sample data generated:', sampleData);
+  loadTeacherDashboardData();
+  renderList();
 }
 
-// Initialize dashboard
-loadSubmissions();
+// Render list view
+function renderList() {
+  currentView = 'list';
+  selectedStudentKey = null;
+  
+  const app = document.getElementById('app');
+  const studentCount = getStudentCount();
+  
+  let html = `
+    <div class="dashboard-container">
+      <header class="dashboard-header">
+        <div>
+          <h1>📊 교사 대시보드</h1>
+          <div class="student-count">학생 수: <strong>${studentCount}</strong>명</div>
+        </div>
+        ${DEV ? '<button class="btn-dev" onclick="generateSampleData()">🧪 샘플 데이터 생성</button>' : ''}
+      </header>
+      
+      <div class="dashboard-content">
+  `;
+  
+  if (studentCount === 0) {
+    const allKeys = Object.keys(localStorage);
+    const teacherDashboardData = localStorage.getItem(TEACHER_DASHBOARD_DATA_KEY);
+    
+    html += `
+      <div class="empty-state">
+        <p><strong>아직 제출한 학생이 없습니다.</strong></p>
+        <div class="debug-info">
+          <h3>디버깅 정보</h3>
+          <p><strong>찾은 키:</strong> ${TEACHER_DASHBOARD_DATA_KEY}</p>
+          <p><strong>데이터 존재:</strong> ${teacherDashboardData ? '예' : '아니오'}</p>
+          <p><strong>전체 localStorage 키 수:</strong> ${allKeys.length}</p>
+          ${DEV ? '<p><button class="btn-dev-small" onclick="generateSampleData()">샘플 데이터 생성하여 테스트</button></p>' : ''}
+        </div>
+      </div>
+    `;
+  } else {
+    html += '<div class="student-list">';
+    
+    const students = Object.keys(scienceReports).sort((a, b) => {
+      const dateA = new Date(scienceReports[a].updatedAt || 0);
+      const dateB = new Date(scienceReports[b].updatedAt || 0);
+      return dateB - dateA;
+    });
+    
+    students.forEach(studentKey => {
+      const student = scienceReports[studentKey];
+      const completedCount = getCompletedStepsCount(studentKey);
+      const progressPercent = (completedCount / 9) * 100;
+      const updatedAt = student.updatedAt ? new Date(student.updatedAt).toLocaleString('ko-KR') : '알 수 없음';
+      
+      html += `
+        <div class="student-card" data-student-key="${studentKey}">
+          <div class="student-info">
+            <h3>${student.studentName} (${student.studentId})</h3>
+            <div class="progress-info">
+              <span class="progress-text">${completedCount}/9 완료</span>
+              <div class="progress-bar">
+                <div class="progress-fill" style="width: ${progressPercent}%"></div>
+              </div>
+            </div>
+            <div class="updated-at">최신 제출: ${updatedAt}</div>
+          </div>
+          <div class="student-actions">
+            <button class="btn-view" onclick="renderDetail('${studentKey}')">상세 보기</button>
+          </div>
+        </div>
+      `;
+    });
+    
+    html += '</div>';
+  }
+  
+  html += `
+      </div>
+    </div>
+  `;
+  
+  app.innerHTML = html;
+}
 
+// Render detail view
+function renderDetail(studentKey) {
+  currentView = 'detail';
+  selectedStudentKey = studentKey;
+  
+  const app = document.getElementById('app');
+  const student = scienceReports[studentKey];
+  
+  if (!student) {
+    console.error('Student not found:', studentKey);
+    renderList();
+    return;
+  }
+  
+  let html = `
+    <div class="dashboard-container">
+      <header class="dashboard-header">
+        <button class="btn-back" onclick="renderList()">← 목록으로</button>
+        <h1>${student.studentName} (${student.studentId})</h1>
+        <button class="btn-evaluate" onclick="showEvaluation('${studentKey}')">📝 평가</button>
+      </header>
+      
+      <div class="dashboard-content">
+        <div class="student-detail">
+  `;
+  
+  for (let step = 1; step <= 9; step++) {
+    const stepGuide = stepGuides.find(s => s.id === step);
+    const stepContent = student.steps[step] || '';
+    const isCompleted = stepContent.trim() !== '';
+    
+    html += `
+      <div class="step-card ${isCompleted ? 'completed' : 'empty'}">
+        <div class="step-header">
+          <h3>${step}. ${stepGuide ? stepGuide.title : `Step ${step}`}</h3>
+          ${isCompleted ? '<span class="badge-completed">완료</span>' : '<span class="badge-empty">미작성</span>'}
+        </div>
+        <div class="step-content">
+          ${isCompleted ? `<pre>${escapeHtml(stepContent)}</pre>` : '<p class="empty-text">작성된 내용이 없습니다.</p>'}
+        </div>
+      </div>
+    `;
+  }
+  
+  html += `
+        </div>
+      </div>
+    </div>
+  `;
+  
+  app.innerHTML = html;
+}
+
+// Show evaluation modal
+function showEvaluation(studentKey) {
+  const student = scienceReports[studentKey];
+  if (!student) {
+    alert('학생 정보를 찾을 수 없습니다.');
+    return;
+  }
+  
+  const evaluation = generateEvaluation(student);
+  
+  try {
+    const evaluationData = JSON.parse(localStorage.getItem('teacherDashboardEvaluations') || '{}');
+    evaluationData[student.studentId] = {
+      ...evaluation,
+      studentId: student.studentId,
+      studentName: student.studentName,
+      evaluatedAt: new Date().toISOString()
+    };
+    localStorage.setItem('teacherDashboardEvaluations', JSON.stringify(evaluationData));
+    console.log('Evaluation saved:', evaluationData[student.studentId]);
+  } catch (error) {
+    console.error('Failed to save evaluation:', error);
+  }
+  
+  const modal = document.createElement('div');
+  modal.className = 'evaluation-modal';
+  modal.innerHTML = `
+    <div class="evaluation-content">
+      <div class="evaluation-header">
+        <h2>평가 결과</h2>
+        <button class="btn-close" onclick="this.closest('.evaluation-modal').remove()">×</button>
+      </div>
+      <div class="evaluation-body">
+        <div class="score-section">
+          <div class="score-item">
+            <span class="score-label">과학성</span>
+            <span class="score-value">${evaluation.scores.scientific}/50</span>
+          </div>
+          <div class="score-item">
+            <span class="score-label">논리성</span>
+            <span class="score-value">${evaluation.scores.logical}/30</span>
+          </div>
+          <div class="score-item">
+            <span class="score-label">창의적 아이디어</span>
+            <span class="score-value">${evaluation.scores.creative}/20</span>
+          </div>
+          <div class="score-item total">
+            <span class="score-label">총점</span>
+            <span class="score-value">${evaluation.scores.total}/100</span>
+          </div>
+        </div>
+        
+        <div class="evaluation-details">
+          <div class="detail-item">
+            <h4>과학성</h4>
+            <p>${evaluation.comments.scientific}</p>
+          </div>
+          <div class="detail-item">
+            <h4>논리성</h4>
+            <p>${evaluation.comments.logical}</p>
+          </div>
+          <div class="detail-item">
+            <h4>창의적 아이디어</h4>
+            <p>${evaluation.comments.creative}</p>
+          </div>
+        </div>
+        
+        <div class="evaluation-feedback">
+          <h4>종합 피드백</h4>
+          <p>${evaluation.feedback}</p>
+        </div>
+        
+        <div class="evaluation-suggestions">
+          <h4>개선 제안</h4>
+          <ul>
+            ${evaluation.suggestions.map(s => `<li>${s}</li>`).join('')}
+          </ul>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      modal.remove();
+    }
+  });
+}
+
+// Generate evaluation based on rules
+function generateEvaluation(student) {
+  const steps = student.steps || {};
+  const allText = Object.values(steps).join(' ').toLowerCase();
+  const allTextLength = allText.length;
+  
+  const completedSteps = Object.keys(steps).length;
+  
+  const scientificKeywords = ['가설', '실험', '변인', '통제', '측정', '관찰', '데이터', '결과', '분석', '독립변인', '종속변인'];
+  const logicalKeywords = ['왜냐하면', '따라서', '그러므로', '결론', '근거', '이유', '원인', '결과', '그래서', '때문에'];
+  const creativeKeywords = ['새로운', '독특한', '창의', '혁신', '다른', '특별한', '차별화', '독창적'];
+  
+  const scientificKeywordCount = scientificKeywords.filter(kw => allText.includes(kw)).length;
+  const logicalKeywordCount = logicalKeywords.filter(kw => allText.includes(kw)).length;
+  const creativeKeywordCount = creativeKeywords.filter(kw => allText.includes(kw)).length;
+  
+  let scientificScore = 0;
+  scientificScore += (completedSteps / 9) * 30;
+  scientificScore += Math.min(20, (scientificKeywordCount / scientificKeywords.length) * 20);
+  
+  let logicalScore = 0;
+  logicalScore += (completedSteps >= 5 ? 15 : (completedSteps / 5) * 15);
+  logicalScore += Math.min(15, (logicalKeywordCount / logicalKeywords.length) * 15);
+  
+  let creativeScore = 0;
+  creativeScore += Math.min(10, creativeKeywordCount > 0 ? 10 : 0);
+  creativeScore += (completedSteps >= 7 ? 10 : (completedSteps / 7) * 10);
+  
+  const wordCountBonus = Math.min(5, allTextLength / 500);
+  scientificScore += wordCountBonus;
+  logicalScore += wordCountBonus * 0.6;
+  creativeScore += wordCountBonus * 0.4;
+  
+  scientificScore = Math.max(0, Math.min(50, Math.round(scientificScore)));
+  logicalScore = Math.max(0, Math.min(30, Math.round(logicalScore)));
+  creativeScore = Math.max(0, Math.min(20, Math.round(creativeScore)));
+  const totalScore = scientificScore + logicalScore + creativeScore;
+  
+  const scientificComment = scientificScore >= 40 
+    ? '과학적 용어와 개념을 잘 활용하고 있습니다. 가설, 변인, 실험 등의 과학적 접근이 체계적입니다.'
+    : scientificScore >= 25
+    ? '과학적 용어 사용이 부족합니다. 가설, 실험, 변인 등의 개념을 더 명확히 다뤄주세요.'
+    : '과학적 접근이 부족합니다. 각 단계에서 과학적 용어와 개념을 명확히 사용해주세요.';
+  
+  const logicalComment = logicalScore >= 20
+    ? '논리적 흐름이 잘 연결되어 있습니다. 각 단계 간의 연결고리가 명확합니다.'
+    : logicalScore >= 12
+    ? '논리적 연결이 일부 부족합니다. 근거와 결론을 더 명확히 연결해주세요.'
+    : '논리적 구조가 부족합니다. 각 단계 간의 인과관계를 더 명확히 표현해주세요.';
+  
+  const creativeComment = creativeScore >= 15
+    ? '창의적이고 독특한 접근이 돋보입니다. 새로운 관점이나 방법을 잘 활용했습니다.'
+    : creativeScore >= 8
+    ? '일부 창의적인 요소가 있으나 더 발전시킬 여지가 있습니다.'
+    : '창의적 아이디어가 부족합니다. 새로운 관점이나 독특한 방법을 시도해보세요.';
+  
+  let feedback = '';
+  if (totalScore >= 80) {
+    feedback = '전반적으로 매우 우수한 보고서입니다. 과학적 탐구 과정을 체계적으로 잘 수행했으며, 논리적 흐름도 명확합니다. 창의적인 접근도 돋보입니다. 각 단계가 잘 연결되어 있어 탐구의 전체적인 흐름을 이해하기 쉽습니다.';
+  } else if (totalScore >= 60) {
+    feedback = '양호한 보고서입니다. 대부분의 탐구 단계를 잘 수행했으나, 일부 부분에서 보완이 필요합니다. 과학적 용어 사용과 논리적 연결을 더 강화하면 더 좋은 보고서가 될 것입니다. 특히 각 단계 간의 연결고리를 명확히 하면 좋겠습니다.';
+  } else if (totalScore >= 40) {
+    feedback = '기본적인 탐구 과정은 수행했으나, 여러 부분에서 개선이 필요합니다. 각 단계를 더 체계적으로 작성하고, 과학적 개념과 논리적 연결을 강화해주세요. 특히 가설 설정과 실험 설계 부분을 더 구체적으로 작성하면 좋겠습니다.';
+  } else {
+    feedback = '탐구 보고서의 기본 구조는 갖추었으나, 내용이 부족합니다. 각 단계별로 더 구체적이고 상세한 내용을 작성하고, 과학적 접근과 논리적 흐름을 개선해주세요. 모든 단계를 완성하고 각 단계 간의 연결을 명확히 하는 것이 중요합니다.';
+  }
+  
+  const suggestions = [];
+  if (completedSteps < 9) {
+    suggestions.push(`모든 단계를 완성해주세요. 현재 ${completedSteps}/9 단계만 작성되었습니다.`);
+  }
+  if (scientificKeywordCount < 5) {
+    suggestions.push('과학적 용어(가설, 실험, 변인, 결과 등)를 더 많이 사용해주세요.');
+  }
+  if (logicalKeywordCount < 3) {
+    suggestions.push('논리적 연결어(왜냐하면, 따라서, 결론 등)를 사용하여 단계 간 연결을 강화해주세요.');
+  }
+  while (suggestions.length < 3) {
+    suggestions.push('글자 수를 늘려 더 상세한 설명을 추가해주세요.');
+  }
+  
+  return {
+    scores: {
+      scientific: scientificScore,
+      logical: logicalScore,
+      creative: creativeScore,
+      total: totalScore
+    },
+    comments: {
+      scientific: scientificComment,
+      logical: logicalComment,
+      creative: creativeComment
+    },
+    feedback: feedback,
+    suggestions: suggestions.slice(0, 3)
+  };
+}
+
+// Escape HTML to prevent XSS
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Make functions available globally
+window.renderList = renderList;
+window.renderDetail = renderDetail;
+window.showEvaluation = showEvaluation;
+window.generateSampleData = generateSampleData;
+
+// Initialize dashboard when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', function() {
+    loadTeacherDashboardData();
+    renderList();
+    
+    // Refresh data periodically (every 5 seconds)
+    setInterval(() => {
+      if (currentView === 'list') {
+        loadTeacherDashboardData();
+        renderList();
+      }
+    }, 5000);
+  });
+} else {
+  loadTeacherDashboardData();
+  renderList();
+  
+  // Refresh data periodically (every 5 seconds)
+  setInterval(() => {
+    if (currentView === 'list') {
+      loadTeacherDashboardData();
+      renderList();
+    }
+  }, 5000);
+}
