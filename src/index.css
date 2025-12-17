@@ -1,3 +1,15 @@
+/* 파스텔 톤 색상 변수 */
+:root {
+  --pastel-purple: #b8a9d8;
+  --pastel-blue: #a8d8ea;
+  --pastel-green: #b5e7a0;
+  --pastel-yellow: #f9e79f;
+  --pastel-pink: #f8b4d9;
+  --primary: #a294c9;
+  --primary-light: #c5b9e0;
+  --primary-lighter: #e8e3f5;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -253,6 +265,10 @@ code {
   background-color: #f0fdf4;
 }
 
+.bg-green-400 {
+  background-color: #4ade80;
+}
+
 .bg-green-500 {
   background-color: #22c55e;
 }
@@ -275,6 +291,10 @@ code {
 
 .bg-yellow-50 {
   background-color: #fefce8;
+}
+
+.bg-red-50 {
+  background-color: #fef2f2;
 }
 
 .bg-red-100 {
@@ -344,6 +364,10 @@ code {
 
 .border-yellow-400 {
   border-color: #facc15;
+}
+
+.border-green-400 {
+  border-color: #4ade80;
 }
 
 .border-red-400 {
@@ -676,4 +700,390 @@ ul li::before {
 
 .max-w-md {
   max-width: 28rem;
+}
+
+/* ============================================
+   1. 상단 학생정보 섹션 디자인 개선
+   ============================================ */
+.student-info,
+#student-info-banner {
+  background: linear-gradient(135deg, #e8e3f5 0%, #f5f1ff 100%);
+  padding: 16px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 3px solid #c5b9e0;
+  box-shadow: 0 2px 8px rgba(162, 148, 201, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.info-value,
+#student-info-banner input[type="text"] {
+  background: white;
+  padding: 6px 16px;
+  border-radius: 20px;
+  border: 2px solid #c5b9e0;
+  font-weight: 700;
+}
+
+.btn-small,
+#student-info-banner button {
+  padding: 6px 14px;
+  border: 2px solid #c5b9e0;
+  background: white;
+  border-radius: 18px;
+  transition: all 0.3s ease;
+}
+
+.btn-small:hover,
+#student-info-banner button:hover {
+  background: #c5b9e0;
+  color: white;
+  transform: translateY(-2px);
+}
+
+/* ============================================
+   2. 네비게이션 버튼 스타일 개선
+   ============================================ */
+.btn-nav,
+.flex.justify-between.items-center.bg-white button:not(#saveBtn).bg-gray-500:not(:disabled),
+.flex.justify-between.items-center.bg-white button:not(#saveBtn).bg-blue-600:not(:disabled) {
+  padding: 12px 24px !important;
+  border: 2px solid #c5b9e0 !important;
+  background: linear-gradient(135deg, #e8e3f5 0%, white 100%) !important;
+  color: #5a4a7a !important;
+  border-radius: 12px !important;
+  transition: all 0.3s ease !important;
+}
+
+.btn-nav:hover,
+.flex.justify-between.items-center.bg-white button:not(#saveBtn).bg-gray-500:not(:disabled):hover,
+.flex.justify-between.items-center.bg-white button:not(#saveBtn).bg-blue-600:not(:disabled):hover {
+  background: linear-gradient(135deg, #c5b9e0 0%, #a294c9 100%) !important;
+  color: white !important;
+  transform: translateY(-2px) !important;
+}
+
+/* ============================================
+   3. 보고서 내보내기 버튼 스타일 개선
+   ============================================ */
+.export-buttons,
+.bg-white.rounded-lg.shadow-md.p-6.sticky > div.flex.flex-row {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+}
+
+.btn-export,
+.bg-white.rounded-lg.shadow-md.p-6.sticky button:not(#saveBtn) {
+  width: 100% !important;
+  padding: 16px 20px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 14px !important;
+  border-radius: 12px !important;
+  transition: all 0.3s ease !important;
+  font-weight: 600 !important;
+}
+
+.export-icon,
+.bg-white.rounded-lg.shadow-md.p-6.sticky button:not(#saveBtn) span {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.export-text {
+  flex: 1;
+  text-align: left;
+}
+
+/* 교사에게 제출 버튼 (JSON) */
+.btn-export.btn-json,
+#submitToTeacherBtn {
+  border: 2px solid #b8a9d8 !important;
+  background: white !important;
+  color: #5a4a7a !important;
+}
+
+.btn-export.btn-json:hover,
+#submitToTeacherBtn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #b8a9d8 0%, #d4c8ea 100%) !important;
+  color: white !important;
+  transform: translateX(4px) !important;
+}
+
+/* TXT 파일로 저장 버튼 */
+.btn-export.btn-txt,
+.bg-white.rounded-lg.shadow-md.p-6.sticky button.bg-blue-600:not(#saveBtn) {
+  border: 2px solid #a8d8ea !important;
+  background: white !important;
+  color: #4a7a8a !important;
+}
+
+.btn-export.btn-txt:hover,
+.bg-white.rounded-lg.shadow-md.p-6.sticky button.bg-blue-600:not(#saveBtn):hover:not(:disabled) {
+  background: linear-gradient(135deg, #a8d8ea 0%, #c8e8f5 100%) !important;
+  color: white !important;
+  transform: translateX(4px) !important;
+}
+
+/* HTML 파일로 저장 버튼 */
+.btn-export.btn-html,
+.bg-white.rounded-lg.shadow-md.p-6.sticky button.bg-green-600:not(#saveBtn) {
+  border: 2px solid #b5e7a0 !important;
+  background: white !important;
+  color: #5a7a4a !important;
+}
+
+.btn-export.btn-html:hover,
+.bg-white.rounded-lg.shadow-md.p-6.sticky button.bg-green-600:not(#saveBtn):hover:not(:disabled) {
+  background: linear-gradient(135deg, #b5e7a0 0%, #d4f5c8 100%) !important;
+  color: white !important;
+  transform: translateX(4px) !important;
+}
+
+/* ============================================
+   Step 6 초등학생용 쉬운 표 편집기 스타일
+   ============================================ */
+.step6-table-wrapper {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 600px;
+  border: 3px solid #e8e3f5;
+  border-radius: 12px;
+  background: white;
+  box-shadow: 0 4px 12px rgba(162, 148, 201, 0.1);
+}
+
+.step6-easy-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 500px;
+}
+
+.step6-easy-table th,
+.step6-easy-table td {
+  border: 2px solid #c5b9e0;
+  padding: 0;
+  margin: 0;
+}
+
+/* 헤더 스타일 (sticky top) */
+.step6-header {
+  background: linear-gradient(135deg, #a294c9 0%, #c5b9e0 100%);
+  color: white;
+  font-weight: 700;
+  font-size: 16px;
+  padding: 0;
+  text-align: center;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  min-width: 120px;
+  white-space: nowrap;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 헤더 입력 필드 */
+.step6-header-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: white;
+  font-weight: 700;
+  font-size: 16px;
+  text-align: center;
+  transition: background-color 0.2s;
+}
+
+.step6-header-input:focus {
+  background: rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+
+.step6-header-input::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* 행 라벨 스타일 (sticky left) */
+.step6-row-label {
+  background: linear-gradient(135deg, #e8e3f5 0%, #f5f1ff 100%);
+  color: #5a4a7a;
+  font-weight: 700;
+  font-size: 16px;
+  padding: 0;
+  text-align: center;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  min-width: 80px;
+  border-right: 3px solid #a294c9 !important;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 행 라벨 입력 필드 */
+.step6-row-label-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #5a4a7a;
+  font-weight: 700;
+  font-size: 16px;
+  text-align: center;
+  transition: background-color 0.2s;
+}
+
+.step6-row-label-input:focus {
+  background: rgba(162, 148, 201, 0.2);
+  box-shadow: inset 0 0 0 2px rgba(162, 148, 201, 0.5);
+}
+
+.step6-row-label-input::placeholder {
+  color: rgba(90, 74, 122, 0.5);
+}
+
+/* 교차점 (헤더와 행 라벨이 만나는 곳 - 왼쪽 상단) */
+thead tr th:first-child.step6-row-label {
+  z-index: 15;
+  background: linear-gradient(135deg, #8d7fb5 0%, #a294c9 100%);
+  color: white;
+  box-shadow: 2px 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+/* 데이터 셀 스타일 */
+.step6-cell {
+  padding: 0;
+  background: white;
+  min-width: 120px;
+}
+
+.step6-input {
+  width: 100%;
+  padding: 14px 16px;
+  border: none;
+  outline: none;
+  font-size: 16px;
+  background: white;
+  color: #1f2937;
+  transition: background-color 0.2s;
+}
+
+.step6-input:focus {
+  background: #fffef5;
+  box-shadow: inset 0 0 0 2px #ffd4a3;
+}
+
+.step6-input::placeholder {
+  color: #9ca3af;
+  font-size: 14px;
+}
+
+/* 행 hover 효과 */
+.step6-easy-table tbody tr:hover .step6-input {
+  background: #fdfbff;
+}
+
+/* 스크롤바 스타일 */
+.step6-table-wrapper::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.step6-table-wrapper::-webkit-scrollbar-track {
+  background: #f5f1ff;
+  border-radius: 6px;
+}
+
+.step6-table-wrapper::-webkit-scrollbar-thumb {
+  background: #c5b9e0;
+  border-radius: 6px;
+}
+
+.step6-table-wrapper::-webkit-scrollbar-thumb:hover {
+  background: #a294c9;
+}
+
+/* ============================================
+   Step 6 표 편집 버튼 스타일 (파스텔 톤)
+   ============================================ */
+.step6-btn {
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  font-size: 14px;
+}
+
+.step6-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* 행 추가 - 파스텔 블루 */
+.step6-btn-add-row {
+  background: var(--pastel-blue, #a8d8ea);
+  color: #0B1F44;
+  border-color: rgba(11, 31, 68, 0.2);
+}
+
+.step6-btn-add-row:hover {
+  background: #8fc8dd;
+  box-shadow: 0 4px 12px rgba(168, 216, 234, 0.4);
+}
+
+/* 열 추가 - 파스텔 그린 */
+.step6-btn-add-col {
+  background: var(--pastel-green, #b5e7a0);
+  color: #0B1F44;
+  border-color: rgba(11, 31, 68, 0.2);
+}
+
+.step6-btn-add-col:hover {
+  background: #9ddb85;
+  box-shadow: 0 4px 12px rgba(181, 231, 160, 0.4);
+}
+
+/* 행 삭제 - 파스텔 오렌지/코랄 */
+.step6-btn-del-row {
+  background: #ffb3a7;
+  color: #3A1200;
+  border-color: rgba(58, 18, 0, 0.2);
+}
+
+.step6-btn-del-row:hover {
+  background: #ff9d8e;
+  box-shadow: 0 4px 12px rgba(255, 179, 167, 0.4);
+}
+
+/* 열 삭제 - 파스텔 핑크/레드 */
+.step6-btn-del-col {
+  background: var(--pastel-pink, #f8b4d9);
+  color: #3A0B0B;
+  border-color: rgba(58, 11, 11, 0.2);
+}
+
+.step6-btn-del-col:hover {
+  background: #f69bc5;
+  box-shadow: 0 4px 12px rgba(248, 180, 217, 0.4);
+}
+
+/* 비우기 - 파스텔 그레이 */
+.step6-btn-clear {
+  background: #d1d5db;
+  color: #111827;
+  border-color: rgba(17, 24, 39, 0.2);
+}
+
+.step6-btn-clear:hover {
+  background: #b8bcc4;
+  box-shadow: 0 4px 12px rgba(209, 213, 219, 0.4);
 }

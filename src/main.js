@@ -20,6 +20,8 @@ let chatHistory = {}; // 각 단계별 대화 기록 { stepId: [{role, content},
 let studentInfo = { studentId: '', studentName: '' }; // 학생 정보
 let step6Data = { // 6번 단계 전용 데이터
   tableData: [], // 표 데이터
+  headerLabels: [], // 헤더 라벨 (항목 1, 항목 2...)
+  rowLabels: [], // 행 라벨 (1회, 2회...)
   canvasImage: null, // 그림판 이미지 (base64)
   graphData: null, // 그래프 데이터
   graphType: 'bar' // 그래프 타입: 'bar', 'line', 'pie'
@@ -36,19 +38,36 @@ function loadData() {
     }
   }
   
-  // Load API key
+  // Load API key (환경 변수 우선, 없으면 localStorage)
+  const envApiKey = import.meta.env.VITE_OPENAI_API_KEY || '';
   const savedApiKey = localStorage.getItem(API_KEY_STORAGE_KEY);
-  if (savedApiKey) {
+  
+  if (envApiKey) {
+    apiKey = envApiKey;
+    // 환경 변수에서 가져온 API 키를 localStorage에 저장 (자동 인증을 위해)
+    if (!savedApiKey) {
+      localStorage.setItem(API_KEY_STORAGE_KEY, envApiKey);
+    }
+  } else if (savedApiKey) {
     apiKey = savedApiKey;
   } else {
-    // Try to get from environment variable
-    apiKey = import.meta.env.VITE_OPENAI_API_KEY || '';
+    apiKey = '';
   }
   
   // Load API status
   const savedStatus = localStorage.getItem(API_STATUS_STORAGE_KEY);
   if (savedStatus) {
     apiStatus = savedStatus;
+  }
+  
+  // API 키가 있으면 자동으로 테스트 (자동 인증)
+  if (apiKey && apiKey.trim() !== '') {
+    // 약간의 지연 후 자동 테스트 (페이지 로드 완료 후)
+    setTimeout(() => {
+      autoTestAPIKey();
+    }, 500);
+  } else {
+    apiStatus = 'invalid';
   }
   
   // Load chat history
@@ -69,7 +88,7 @@ function loadData() {
       step6Data = JSON.parse(savedStep6Data);
     } catch (error) {
       console.error('Failed to load step 6 data:', error);
-      step6Data = { tableData: [], canvasImage: null, graphData: null, graphType: 'bar' };
+      step6Data = { tableData: [], headerLabels: [], rowLabels: [], canvasImage: null, graphData: null, graphType: 'bar' };
     }
   }
   
@@ -275,7 +294,7 @@ async function saveToSheet({ studentId, studentName, step, answer }) {
 // Submit answer function - 저장 버튼 클릭 시 호출
 async function submitAnswer() {
   const currentContent = reportData[currentStep] || '';
-  const textarea = document.querySelector(`textarea[data-step="${currentStep}"]`);
+  const textarea = document.querySelector(`textarea[data-step-textarea="${currentStep}"]`);
   const actualContent = textarea ? textarea.value : currentContent;
   
   if (!actualContent.trim()) {
@@ -295,6 +314,18 @@ async function submitAnswer() {
     saveBtn.disabled = true;
     saveBtn.textContent = '저장 중...';
     
+    // localStorage에 학생별 데이터 저장 (교사용 대시보드를 위해)
+    const studentKey = `student-${studentInfo.studentId}-${studentInfo.studentName}`;
+    const studentData = {
+      studentId: studentInfo.studentId,
+      studentName: studentInfo.studentName,
+      reportData: reportData,
+      step6Data: step6Data,
+      lastUpdated: new Date().toISOString()
+    };
+    localStorage.setItem(studentKey, JSON.stringify(studentData));
+    
+    // Apps Script로도 전송 (기존 기능 유지)
     const result = await saveToSheet({
       studentId: studentInfo.studentId,
       studentName: studentInfo.studentName,
@@ -381,6 +412,19 @@ function showResponseMessage(type, message) {
 function saveData() {
   if (Object.keys(reportData).length > 0) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(reportData));
+    
+    // 교사용 대시보드를 위해 학생별 데이터도 저장
+    if (studentInfo.studentId && studentInfo.studentName) {
+      const studentKey = `student-${studentInfo.studentId}-${studentInfo.studentName}`;
+      const studentData = {
+        studentId: studentInfo.studentId,
+        studentName: studentInfo.studentName,
+        reportData: reportData,
+        step6Data: step6Data,
+        lastUpdated: new Date().toISOString()
+      };
+      localStorage.setItem(studentKey, JSON.stringify(studentData));
+    }
   }
 }
 
@@ -456,44 +500,25 @@ function createStudentInfoBanner() {
   return banner;
 }
 
-// API Key Status Banner
+// API Key Status Banner (신호등 아이콘 + 텍스트 표시)
 function createAPIStatusBanner() {
   const banner = document.createElement('div');
   banner.id = 'api-status-banner';
-  banner.className = 'w-full py-3 px-4 shadow-md';
+  banner.className = 'w-full py-2 px-4';
   
   const container = document.createElement('div');
-  container.className = 'container mx-auto flex items-center justify-between flex-wrap gap-2';
-  
-  const leftDiv = document.createElement('div');
-  leftDiv.className = 'flex items-center gap-3';
+  container.className = 'container mx-auto flex items-center justify-end gap-2';
   
   const statusIcon = document.createElement('span');
-  statusIcon.className = 'text-xl';
+  statusIcon.className = 'text-2xl';
+  statusIcon.id = 'api-status-icon';
   
   const statusText = document.createElement('span');
-  statusText.className = 'font-medium';
+  statusText.className = 'font-medium text-sm';
+  statusText.id = 'api-status-text';
   
-  const rightDiv = document.createElement('div');
-  rightDiv.className = 'flex items-center gap-2';
-  
-  const testButton = document.createElement('button');
-  testButton.className = 'px-3 py-1 text-sm rounded hover:opacity-80 transition-opacity';
-  testButton.textContent = '🔍 테스트';
-  testButton.addEventListener('click', testAPIKey);
-  
-  const settingsButton = document.createElement('button');
-  settingsButton.className = 'px-3 py-1 text-sm rounded hover:opacity-80 transition-opacity';
-  settingsButton.textContent = '⚙️ 설정';
-  settingsButton.addEventListener('click', showAPIKeySettings);
-  
-  leftDiv.appendChild(statusIcon);
-  leftDiv.appendChild(statusText);
-  rightDiv.appendChild(testButton);
-  rightDiv.appendChild(settingsButton);
-  
-  container.appendChild(leftDiv);
-  container.appendChild(rightDiv);
+  container.appendChild(statusIcon);
+  container.appendChild(statusText);
   banner.appendChild(container);
   
   updateAPIStatusBanner(banner, statusIcon, statusText);
@@ -505,45 +530,44 @@ function updateAPIStatusBanner(banner, statusIcon, statusText) {
   if (!banner) {
     banner = document.getElementById('api-status-banner');
     if (!banner) return;
-    statusIcon = banner.querySelector('span.text-xl');
-    statusText = statusIcon?.nextElementSibling;
+    statusIcon = document.getElementById('api-status-icon');
+    statusText = document.getElementById('api-status-text');
   }
   
   if (!statusIcon || !statusText) return;
   
-  let bgColor, icon, text;
+  let icon, text;
   
   switch (apiStatus) {
     case 'testing':
-      bgColor = 'bg-yellow-100';
-      icon = '⏳';
-      text = 'API 키 테스트 중...';
+      icon = '🟡'; // 노란불 (테스트 중)
+      text = 'API Key Testing...';
       break;
     case 'valid':
-      bgColor = 'bg-green-100';
-      icon = '✅';
-      text = 'API 키 정상 작동';
+      icon = '🟢'; // 초록불 (정상 작동)
+      text = 'API Key Activated';
       break;
     case 'invalid':
-      bgColor = 'bg-red-100';
-      icon = '❌';
-      text = 'API 키 오류 - 설정을 확인해주세요';
+      icon = '🔴'; // 빨간불 (오류)
+      text = 'API Key Inactive';
       break;
     default:
-      bgColor = 'bg-gray-100';
-      icon = '❓';
-      text = 'API 키 미설정 - AI 기능을 사용하려면 설정이 필요합니다';
+      icon = '🔴'; // 빨간불 (미설정)
+      text = 'API Key Inactive';
   }
   
-  banner.className = `w-full py-3 px-4 shadow-md ${bgColor}`;
   statusIcon.textContent = icon;
   statusText.textContent = text;
+  statusIcon.title = apiStatus === 'valid' ? 'API Key Active' : 'API Key Inactive';
 }
 
-// Test API Key
-async function testAPIKey() {
-  if (!apiKey || apiKey.trim() === '') {
-    alert('API 키가 설정되지 않았습니다. 설정 버튼을 클릭하여 API 키를 입력해주세요.');
+// Auto Test API Key (자동 테스트)
+async function autoTestAPIKey() {
+  const apiKeyToUse = apiKey || import.meta.env.VITE_OPENAI_API_KEY || '';
+  
+  if (!apiKeyToUse || apiKeyToUse.trim() === '') {
+    apiStatus = 'invalid';
+    updateAPIStatusBanner();
     return;
   }
   
@@ -554,7 +578,7 @@ async function testAPIKey() {
     const response = await fetch('https://api.openai.com/v1/models', {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${apiKey}`
+        'Authorization': `Bearer ${apiKeyToUse}`
       }
     });
     
@@ -793,9 +817,21 @@ function createStepCard() {
     textarea.className = 'w-full h-48 p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none';
     textarea.setAttribute('data-step-textarea', currentStep);
     
+    // textarea 아래 컨테이너 (글자수 왼쪽, 저장 버튼 오른쪽)
+    const bottomContainer = document.createElement('div');
+    bottomContainer.className = 'flex items-center justify-between mt-2';
+    
+    // 글자수 (왼쪽)
     const charCount = document.createElement('p');
-    charCount.className = 'text-sm text-gray-500 mt-2 char-count-display';
+    charCount.className = 'text-sm text-gray-500 char-count-display';
     charCount.textContent = `글자 수: ${currentContent.length}`;
+    
+    // 저장 버튼 (오른쪽)
+    const saveBtn = document.createElement('button');
+    saveBtn.id = 'saveBtn';
+    saveBtn.className = 'px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors';
+    saveBtn.textContent = '💾 저장';
+    saveBtn.addEventListener('click', submitAnswer);
     
     textarea.addEventListener('input', (e) => {
       const value = e.target.value;
@@ -804,8 +840,11 @@ function createStepCard() {
       updateAIAssistantButton();
     });
     
+    bottomContainer.appendChild(charCount);
+    bottomContainer.appendChild(saveBtn);
+    
     div.appendChild(textarea);
-    div.appendChild(charCount);
+    div.appendChild(bottomContainer);
   }
   
   return div;
@@ -824,8 +863,8 @@ function createStep6SpecialUI() {
   
   const tabs = [
     { id: 'text', label: '📝 텍스트', icon: '📝' },
-    { id: 'table', label: '📊 표 편집', icon: '📊' },
     { id: 'drawing', label: '✏️ 그림판', icon: '✏️' },
+    { id: 'table', label: '📊 표 편집', icon: '📊' },
     { id: 'graph', label: '📈 그래프', icon: '📈' }
   ];
   
@@ -893,9 +932,21 @@ function createStep6TextEditor() {
   textarea.className = 'w-full h-48 p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none';
   textarea.setAttribute('data-step-textarea', '6');
   
+  // textarea 아래 컨테이너 (글자수 왼쪽, 저장 버튼 오른쪽)
+  const bottomContainer = document.createElement('div');
+  bottomContainer.className = 'flex items-center justify-between mt-2';
+  
+  // 글자수 (왼쪽)
   const charCount = document.createElement('p');
-  charCount.className = 'text-sm text-gray-500 mt-2';
+  charCount.className = 'text-sm text-gray-500';
   charCount.textContent = `글자 수: ${textarea.value.length}`;
+  
+  // 저장 버튼 (오른쪽)
+  const saveBtn = document.createElement('button');
+  saveBtn.id = 'saveBtn';
+  saveBtn.className = 'px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors';
+  saveBtn.textContent = '💾 저장';
+  saveBtn.addEventListener('click', submitAnswer);
   
   textarea.addEventListener('input', (e) => {
     const value = e.target.value;
@@ -904,12 +955,15 @@ function createStep6TextEditor() {
     updateAIAssistantButton();
   });
   
+  bottomContainer.appendChild(charCount);
+  bottomContainer.appendChild(saveBtn);
+  
   div.appendChild(textarea);
-  div.appendChild(charCount);
+  div.appendChild(bottomContainer);
   return div;
 }
 
-// Step 6 표 편집기
+// Step 6 표 편집기 (초등학생용 쉬운 표)
 function createStep6TableEditor() {
   const div = document.createElement('div');
   div.className = 'space-y-4';
@@ -919,49 +973,70 @@ function createStep6TableEditor() {
   toolbar.className = 'flex gap-2 mb-4 flex-wrap';
   
   const addRowBtn = document.createElement('button');
-  addRowBtn.className = 'px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors';
+  addRowBtn.className = 'step6-btn step6-btn-add-row';
   addRowBtn.textContent = '➕ 행 추가';
   addRowBtn.addEventListener('click', () => {
     if (step6Data.tableData.length === 0) {
       step6Data.tableData = [['', '']];
+      step6Data.rowLabels = ['1회'];
     } else {
       const colCount = step6Data.tableData[0].length;
       step6Data.tableData.push(new Array(colCount).fill(''));
+      step6Data.rowLabels.push(`${step6Data.tableData.length}회`);
     }
     saveStep6Data();
     renderTable();
   });
   
   const addColBtn = document.createElement('button');
-  addColBtn.className = 'px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors';
+  addColBtn.className = 'step6-btn step6-btn-add-col';
   addColBtn.textContent = '➕ 열 추가';
   addColBtn.addEventListener('click', () => {
     if (step6Data.tableData.length === 0) {
       step6Data.tableData = [['', '']];
+      step6Data.headerLabels = ['항목 1', '항목 2'];
     } else {
       step6Data.tableData.forEach(row => row.push(''));
+      step6Data.headerLabels.push(`항목 ${step6Data.headerLabels.length + 1}`);
     }
     saveStep6Data();
     renderTable();
   });
   
   const delRowBtn = document.createElement('button');
-  delRowBtn.className = 'px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors';
+  delRowBtn.className = 'step6-btn step6-btn-del-row';
   delRowBtn.textContent = '➖ 행 삭제';
   delRowBtn.addEventListener('click', () => {
     if (step6Data.tableData.length > 1) {
       step6Data.tableData.pop();
+      step6Data.rowLabels.pop();
       saveStep6Data();
       renderTable();
     }
   });
   
   const delColBtn = document.createElement('button');
-  delColBtn.className = 'px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors';
+  delColBtn.className = 'step6-btn step6-btn-del-col';
   delColBtn.textContent = '➖ 열 삭제';
   delColBtn.addEventListener('click', () => {
     if (step6Data.tableData.length > 0 && step6Data.tableData[0].length > 1) {
       step6Data.tableData.forEach(row => row.pop());
+      step6Data.headerLabels.pop();
+      saveStep6Data();
+      renderTable();
+    }
+  });
+  
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'step6-btn step6-btn-clear';
+  clearBtn.textContent = '🗑️ 비우기';
+  clearBtn.addEventListener('click', () => {
+    if (confirm('표의 모든 내용을 지우시겠습니까?')) {
+      step6Data.tableData.forEach((row, rowIdx) => {
+        row.forEach((cell, colIdx) => {
+          step6Data.tableData[rowIdx][colIdx] = '';
+        });
+      });
       saveStep6Data();
       renderTable();
     }
@@ -971,10 +1046,11 @@ function createStep6TableEditor() {
   toolbar.appendChild(addColBtn);
   toolbar.appendChild(delRowBtn);
   toolbar.appendChild(delColBtn);
+  toolbar.appendChild(clearBtn);
   
-  // 표 영역
+  // 표 영역 (스크롤 가능)
   const tableContainer = document.createElement('div');
-  tableContainer.className = 'overflow-x-auto border border-gray-300 rounded-lg';
+  tableContainer.className = 'step6-table-wrapper';
   tableContainer.id = 'step6-table-container';
   
   function renderTable() {
@@ -982,30 +1058,175 @@ function createStep6TableEditor() {
     
     if (step6Data.tableData.length === 0) {
       step6Data.tableData = [['', ''], ['', '']];
+      step6Data.headerLabels = ['항목 1', '항목 2'];
+      step6Data.rowLabels = ['1회', '2회'];
+      saveStep6Data();
     }
     
     const table = document.createElement('table');
-    table.className = 'w-full border-collapse';
+    table.className = 'step6-easy-table';
+    
+    // 헤더 행 생성
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    
+    // 왼쪽 첫 열 (빈 헤더)
+    const emptyHeader = document.createElement('th');
+    emptyHeader.className = 'step6-row-label sticky-left';
+    emptyHeader.textContent = '';
+    headerRow.appendChild(emptyHeader);
+    
+    // 항목 헤더들 (편집 가능)
+    const colCount = step6Data.tableData[0] ? step6Data.tableData[0].length : 2;
+    
+    // headerLabels 초기화 (없으면 기본값 생성)
+    if (!step6Data.headerLabels || step6Data.headerLabels.length !== colCount) {
+      step6Data.headerLabels = [];
+      for (let i = 0; i < colCount; i++) {
+        step6Data.headerLabels.push(`항목 ${i + 1}`);
+      }
+      saveStep6Data();
+    }
+    
+    for (let colIdx = 0; colIdx < colCount; colIdx++) {
+      const th = document.createElement('th');
+      th.className = 'step6-header sticky-top';
+      
+      const headerInput = document.createElement('input');
+      headerInput.type = 'text';
+      headerInput.value = step6Data.headerLabels[colIdx] || `항목 ${colIdx + 1}`;
+      headerInput.className = 'step6-header-input';
+      headerInput.setAttribute('data-col', colIdx);
+      
+      headerInput.addEventListener('input', (e) => {
+        const col = parseInt(e.target.getAttribute('data-col'));
+        step6Data.headerLabels[col] = e.target.value;
+        saveStep6Data();
+      });
+      
+      // Enter 키로 다음 헤더로 이동
+      headerInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const headerInputs = Array.from(tableContainer.querySelectorAll('.step6-header-input'));
+          const currentIndex = headerInputs.indexOf(headerInput);
+          if (currentIndex < headerInputs.length - 1) {
+            headerInputs[currentIndex + 1].focus();
+          } else {
+            // 마지막 헤더면 첫 번째 데이터 셀로
+            const firstDataInput = tableContainer.querySelector('.step6-input[data-row="0"][data-col="0"]');
+            if (firstDataInput) {
+              firstDataInput.focus();
+            }
+          }
+        }
+      });
+      
+      th.appendChild(headerInput);
+      headerRow.appendChild(th);
+    }
+    
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+    
+    // 본문 행들
+    const tbody = document.createElement('tbody');
+    
+    // rowLabels 초기화 (없으면 기본값 생성)
+    if (!step6Data.rowLabels || step6Data.rowLabels.length !== step6Data.tableData.length) {
+      step6Data.rowLabels = [];
+      for (let i = 0; i < step6Data.tableData.length; i++) {
+        step6Data.rowLabels.push(`${i + 1}회`);
+      }
+      saveStep6Data();
+    }
     
     step6Data.tableData.forEach((row, rowIdx) => {
       const tr = document.createElement('tr');
+      
+      // 왼쪽 첫 열 (회차 라벨 - 편집 가능)
+      const rowLabel = document.createElement('td');
+      rowLabel.className = 'step6-row-label sticky-left';
+      
+      const rowLabelInput = document.createElement('input');
+      rowLabelInput.type = 'text';
+      rowLabelInput.value = step6Data.rowLabels[rowIdx] || `${rowIdx + 1}회`;
+      rowLabelInput.className = 'step6-row-label-input';
+      rowLabelInput.setAttribute('data-row', rowIdx);
+      
+      rowLabelInput.addEventListener('input', (e) => {
+        const row = parseInt(e.target.getAttribute('data-row'));
+        step6Data.rowLabels[row] = e.target.value;
+        saveStep6Data();
+      });
+      
+      // Enter 키로 다음 행 라벨로 이동
+      rowLabelInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const rowLabelInputs = Array.from(tableContainer.querySelectorAll('.step6-row-label-input'));
+          const currentIndex = rowLabelInputs.indexOf(rowLabelInput);
+          if (currentIndex < rowLabelInputs.length - 1) {
+            rowLabelInputs[currentIndex + 1].focus();
+          } else {
+            // 마지막 행 라벨이면 첫 번째 데이터 셀으로
+            const firstDataInput = tableContainer.querySelector('.step6-input[data-row="0"][data-col="0"]');
+            if (firstDataInput) {
+              firstDataInput.focus();
+            }
+          }
+        }
+      });
+      
+      rowLabel.appendChild(rowLabelInput);
+      tr.appendChild(rowLabel);
+      
+      // 데이터 셀들 (첫 번째 열부터 표시)
       row.forEach((cell, colIdx) => {
         const td = document.createElement('td');
-        td.className = 'border border-gray-300 p-2';
+        td.className = 'step6-cell';
         const input = document.createElement('input');
         input.type = 'text';
         input.value = cell;
-        input.className = 'w-full p-1 border-none focus:outline-none focus:bg-blue-50';
+        input.placeholder = '입력';
+        input.className = 'step6-input';
+        input.setAttribute('data-row', rowIdx);
+        input.setAttribute('data-col', colIdx);
+        
+        // 입력 이벤트
         input.addEventListener('input', (e) => {
-          step6Data.tableData[rowIdx][colIdx] = e.target.value;
+          const row = parseInt(e.target.getAttribute('data-row'));
+          const col = parseInt(e.target.getAttribute('data-col'));
+          step6Data.tableData[row][col] = e.target.value;
           saveStep6Data();
         });
+        
+        // Enter 키로 다음 칸 이동
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            const inputs = Array.from(tableContainer.querySelectorAll('.step6-input'));
+            const currentIndex = inputs.indexOf(input);
+            if (currentIndex < inputs.length - 1) {
+              inputs[currentIndex + 1].focus();
+            } else {
+              // 마지막 칸이면 다음 행 첫 칸으로
+              const nextRowInput = tableContainer.querySelector(`.step6-input[data-row="${rowIdx + 1}"][data-col="0"]`);
+              if (nextRowInput) {
+                nextRowInput.focus();
+              }
+            }
+          }
+        });
+        
         td.appendChild(input);
         tr.appendChild(td);
       });
-      table.appendChild(tr);
+      
+      tbody.appendChild(tr);
     });
     
+    table.appendChild(tbody);
     tableContainer.appendChild(table);
   }
   
@@ -1250,8 +1471,11 @@ function createStep6GraphViewer() {
     const table = step6Data.tableData;
     if (table.length < 2) return;
     
-    const headers = table[0];
-    const dataRows = table.slice(1);
+    // headerLabels 사용 (없으면 기본값)
+    const headers = step6Data.headerLabels && step6Data.headerLabels.length > 0 
+      ? step6Data.headerLabels 
+      : table[0].map((_, idx) => `항목 ${idx + 1}`);
+    const dataRows = table;
     
     step6Data.graphData = {
       labels: headers,
@@ -1264,8 +1488,13 @@ function createStep6GraphViewer() {
         return isNaN(num) ? 0 : num;
       });
       
+      // rowLabels 사용 (없으면 기본값)
+      const rowLabel = step6Data.rowLabels && step6Data.rowLabels[idx] 
+        ? step6Data.rowLabels[idx] 
+        : `데이터 ${idx + 1}`;
+      
       step6Data.graphData.datasets.push({
-        label: `데이터 ${idx + 1}`,
+        label: rowLabel,
         data: values
       });
     });
@@ -1529,7 +1758,12 @@ function createAIAssistant() {
     try {
       const apiKeyToUse = apiKey || import.meta.env.VITE_OPENAI_API_KEY || '';
       if (!apiKeyToUse) {
-        throw new Error('API 키가 설정되지 않았습니다. 상단의 설정 버튼을 클릭하여 API 키를 입력해주세요.');
+        throw new Error('API 키가 설정되지 않았습니다.');
+      }
+      
+      // API 상태가 unknown이면 자동 테스트
+      if (apiStatus === 'unknown' || apiStatus === '') {
+        await autoTestAPIKey();
       }
       
       // 현재 단계의 대화 기록 가져오기
@@ -2193,13 +2427,6 @@ function render() {
   stepCounter.className = 'text-gray-600 font-medium';
   stepCounter.textContent = `${currentStep} / ${stepGuides.length}`;
   
-  // 저장 버튼 추가
-  const saveBtn = document.createElement('button');
-  saveBtn.id = 'saveBtn';
-  saveBtn.className = 'px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors';
-  saveBtn.textContent = '💾 저장';
-  saveBtn.addEventListener('click', submitAnswer);
-  
   const nextButton = document.createElement('button');
   nextButton.className = 'px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors';
   nextButton.textContent = '다음 단계 →';
@@ -2208,7 +2435,6 @@ function render() {
   
   navigationDiv.appendChild(prevButton);
   navigationDiv.appendChild(stepCounter);
-  navigationDiv.appendChild(saveBtn);
   navigationDiv.appendChild(nextButton);
   
   leftColumn.appendChild(navigationDiv);
