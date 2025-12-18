@@ -11,7 +11,7 @@ const stepGuides = [
   { id: 9, title: '참고 문헌', icon: '📖' }
 ];
 
-// Google Apps Script URL (학생 페이지와 동일)
+// Google Apps Script URL
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_PsbLZpDxaWZWA1zRcjLESqPV2ktxmYIvu4WdM7tHAFE8y-qIRmDgbdaQcvB9KYQexA/exec";
 
 // Dashboard State
@@ -35,9 +35,8 @@ async function loadTeacherDashboardData() {
     // GET 요청으로 모든 학생 데이터 가져오기
     const response = await fetch(SCRIPT_URL, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json'
-      }
+      mode: 'cors',
+      cache: 'no-cache'
     });
     
     console.log('Response status:', response.status);
@@ -49,7 +48,7 @@ async function loadTeacherDashboardData() {
     
     // 응답 텍스트 먼저 확인
     const responseText = await response.text();
-    console.log('Response text (first 500 chars):', responseText.substring(0, 500));
+    console.log('Response text (first 1000 chars):', responseText.substring(0, 1000));
     
     // JSON 파싱 시도
     let rawData;
@@ -58,49 +57,123 @@ async function loadTeacherDashboardData() {
       console.log('Parsed JSON data:', rawData);
     } catch (e) {
       console.error('Failed to parse JSON:', e);
+      console.error('Response text:', responseText);
       throw new Error('Invalid JSON response from server');
     }
     
-    // 데이터 구조 변환: Apps Script에서 받은 데이터를 내부 형식으로 변환
-    // Apps Script는 { studentId: { studentId, studentName, step1, step2, ..., step9, updatedAt } } 형식으로 반환
+    // 데이터 구조 변환: Apps Script 응답 형식에 맞게 처리
+    // 형식: { ok: true, students: [{ studentId, studentName, steps: [...], completedSteps, updatedAt }, ...], stepCount: 9 }
     scienceReports = {};
     
-    if (rawData && typeof rawData === 'object') {
-      Object.keys(rawData).forEach(studentId => {
-        const student = rawData[studentId];
-        
-        // 필수 필드 확인
-        if (!student.studentId || !student.studentName) {
-          console.warn('Invalid student data (missing studentId or studentName):', student);
+    // ok 필드 확인
+    if (rawData.ok !== true) {
+      console.warn('Response ok field is not true:', rawData);
+    }
+    
+    // students 배열 확인
+    if (rawData.students && Array.isArray(rawData.students)) {
+      console.log('Found students array with', rawData.students.length, 'students');
+      
+      rawData.students.forEach((student, index) => {
+        if (!student || !student.studentId || !student.studentName) {
+          console.warn(`Skipping invalid student at index ${index}:`, student);
           return;
         }
         
-        const studentKey = `${student.studentId}|${student.studentName}`;
+        const studentId = student.studentId;
+        const studentName = student.studentName;
+        const studentKey = `${studentId}|${studentName}`;
         
-        // steps 객체로 변환
+        // steps 배열을 객체로 변환 (인덱스 0~8 -> step 1~9)
         const steps = {};
         let completedCount = 0;
-        for (let i = 1; i <= 9; i++) {
-          const stepKey = `step${i}`;
-          const stepContent = student[stepKey];
-          if (stepContent && stepContent.trim()) {
-            steps[i] = stepContent.trim();
-            completedCount++;
+        
+        if (student.steps && Array.isArray(student.steps)) {
+          // steps 배열의 인덱스 0이 step1, 인덱스 1이 step2, ... 인덱스 8이 step9
+          for (let i = 0; i < 9; i++) {
+            const stepNumber = i + 1; // 1~9
+            const stepContent = student.steps[i];
+            
+            // 문자열이 아닌 경우 문자열로 변환
+            let stepText = '';
+            if (stepContent !== null && stepContent !== undefined) {
+              stepText = String(stepContent).trim();
+            }
+            
+            if (stepText) {
+              steps[stepNumber] = stepText;
+              completedCount++;
+            }
           }
         }
         
+        const updatedAt = student.updatedAt || new Date().toISOString();
+        const completedSteps = student.completedSteps !== undefined ? student.completedSteps : completedCount;
+        
         scienceReports[studentKey] = {
-          studentId: student.studentId,
-          studentName: student.studentName,
-          updatedAt: student.updatedAt || student.submittedAt || new Date().toISOString(),
-          completedSteps: student.completedSteps || completedCount,
+          studentId: studentId,
+          studentName: studentName,
+          updatedAt: updatedAt,
+          completedSteps: completedSteps,
           steps: steps
         };
+        
+        console.log(`Processed student: ${studentName} (${studentId}), completedSteps: ${completedSteps}`);
       });
+    } else {
+      console.warn('No students array found in response. Response structure:', rawData);
+      
+      // 대체 형식 지원: 직접 배열이거나 다른 형식
+      if (Array.isArray(rawData)) {
+        console.log('Data is direct array format');
+        rawData.forEach((student, index) => {
+          if (!student || !student.studentId || !student.studentName) {
+            console.warn(`Skipping invalid student at index ${index}:`, student);
+            return;
+          }
+          
+          const studentId = student.studentId;
+          const studentName = student.studentName;
+          const studentKey = `${studentId}|${studentName}`;
+          
+          const steps = {};
+          let completedCount = 0;
+          
+          if (student.steps && Array.isArray(student.steps)) {
+            for (let i = 0; i < 9; i++) {
+              const stepNumber = i + 1;
+              const stepContent = student.steps[i];
+              let stepText = '';
+              if (stepContent !== null && stepContent !== undefined) {
+                stepText = String(stepContent).trim();
+              }
+              if (stepText) {
+                steps[stepNumber] = stepText;
+                completedCount++;
+              }
+            }
+          }
+          
+          const updatedAt = student.updatedAt || new Date().toISOString();
+          const completedSteps = student.completedSteps !== undefined ? student.completedSteps : completedCount;
+          
+          scienceReports[studentKey] = {
+            studentId: studentId,
+            studentName: studentName,
+            updatedAt: updatedAt,
+            completedSteps: completedSteps,
+            steps: steps
+          };
+        });
+      }
     }
     
     console.log('Converted scienceReports:', scienceReports);
     console.log('Student count:', Object.keys(scienceReports).length);
+    
+    if (Object.keys(scienceReports).length === 0) {
+      console.warn('No students found in the data. Raw data:', rawData);
+    }
     
   } catch (error) {
     console.error('Failed to load teacher dashboard data from Apps Script:', error);
@@ -165,7 +238,7 @@ function generateSampleData() {
       updatedAt: new Date('2025-12-18T01:28:31').toISOString()
     },
     'ttokttok': {
-      studentId: 'ttokttok',
+      studentId: '6학년2반',
       studentName: '왕똑똑',
       step1: '탄산음료의 종류에 따른 이산화탄소 발생량 비교',
       step2: '탄산음료를 마시다가 종류에 따라 탄산의 양이 다른 것 같아서 궁금했습니다.',
@@ -180,7 +253,7 @@ function generateSampleData() {
       updatedAt: new Date('2025-12-18T02:20:09').toISOString()
     },
     'yeongjae': {
-      studentId: 'yeongjae',
+      studentId: '6학년4반',
       studentName: '나영재',
       step1: '종이의 두께가 종이비행기의 날아가는 거리에 미치는 영향',
       step2: '종이비행기를 만들다가 종이의 두께가 거리에 영향을 줄 것 같아서 궁금했습니다.',
@@ -225,6 +298,7 @@ function generateSampleData() {
 
 // Refresh button handler
 async function refreshData() {
+  console.log('Manual refresh triggered');
   await loadTeacherDashboardData();
   renderList();
 }
@@ -244,7 +318,10 @@ function renderList() {
           <h1>📊 교사 대시보드</h1>
           <div class="student-count">학생 수: <strong>${studentCount}</strong>명</div>
         </div>
-        <button class="btn-sample" onclick="generateSampleData()">✨ 샘플 데이터 생성</button>
+        <div style="display: flex; gap: 12px;">
+          <button class="btn-refresh" onclick="refreshData()">🔄 새로고침</button>
+          <button class="btn-sample" onclick="generateSampleData()">✨ 샘플 데이터 생성</button>
+        </div>
       </header>
       
       <div class="dashboard-content">
@@ -254,6 +331,9 @@ function renderList() {
     html += `
       <div class="empty-state">
         <p><strong>데이터를 불러오는 중...</strong></p>
+        <div style="margin-top: 20px;">
+          <div style="width: 40px; height: 40px; border: 4px solid #e5e7eb; border-top-color: #2563eb; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto;"></div>
+        </div>
       </div>
     `;
   } else if (studentCount === 0) {
@@ -262,6 +342,7 @@ function renderList() {
         <p><strong>아직 제출한 학생이 없습니다.</strong></p>
         <p style="margin-top: 16px; color: #666;">Apps Script에서 데이터를 가져오는 중 오류가 발생했거나, 실제로 제출된 데이터가 없을 수 있습니다.</p>
         <p style="margin-top: 8px; color: #666;">브라우저 콘솔을 확인하여 자세한 오류 정보를 확인하세요.</p>
+        <button class="btn-refresh" onclick="refreshData()" style="margin-top: 20px;">🔄 다시 시도</button>
       </div>
     `;
   } else {
@@ -277,12 +358,28 @@ function renderList() {
       const student = scienceReports[studentKey];
       const completedCount = getCompletedStepsCount(studentKey);
       const progressPercent = (completedCount / 9) * 100;
-      const updatedAt = student.updatedAt ? new Date(student.updatedAt).toLocaleString('ko-KR') : '알 수 없음';
+      // Format date like "2025. 12. 18. 오전 2:20:09"
+      let updatedAt = '알 수 없음';
+      if (student.updatedAt) {
+        const date = new Date(student.updatedAt);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = date.getHours();
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        const ampm = hours < 12 ? '오전' : '오후';
+        const displayHours = hours % 12 || 12;
+        updatedAt = `${year}. ${month}. ${day}. ${ampm} ${displayHours}:${minutes}:${seconds}`;
+      }
+      
+      // Format student name display (support both formats: "이름 (학번)" or "이름 (학년반)")
+      let studentDisplay = `${student.studentName} (${student.studentId})`;
       
       html += `
         <div class="student-card" data-student-key="${studentKey}">
           <div class="student-info">
-            <h3>${student.studentName} (${student.studentId})</h3>
+            <h3>${studentDisplay}</h3>
             <div class="progress-info">
               <span class="progress-text">${completedCount}/9 완료</span>
               <div class="progress-bar">
@@ -562,6 +659,7 @@ window.renderList = renderList;
 window.renderDetail = renderDetail;
 window.showEvaluation = showEvaluation;
 window.refreshData = refreshData;
+window.generateSampleData = generateSampleData;
 
 // Initialize dashboard when DOM is ready
 if (document.readyState === 'loading') {

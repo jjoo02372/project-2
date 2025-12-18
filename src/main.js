@@ -111,8 +111,8 @@ function saveStudentInfo() {
   localStorage.setItem(STUDENT_INFO_STORAGE_KEY, JSON.stringify(studentInfo));
 }
 
-// Submit all answers to teacher (모든 답변을 교사에게 제출) - localStorage 사용
-function submitAllAnswersToTeacher() {
+// Submit all answers to teacher (모든 답변을 교사에게 제출) - localStorage + Apps Script
+async function submitAllAnswersToTeacher() {
   if (!studentInfo.studentId || !studentInfo.studentName) {
     alert('학생 정보를 먼저 입력해주세요.');
     return;
@@ -148,7 +148,7 @@ function submitAllAnswersToTeacher() {
     submitBtn.textContent = '제출 중...';
     
     try {
-      // 기존 데이터 로드
+      // 1. localStorage에 저장 (백업)
       const existingData = JSON.parse(localStorage.getItem(TEACHER_DASHBOARD_DATA_KEY) || '{}');
       
       // 학생 데이터 생성
@@ -174,17 +174,55 @@ function submitAllAnswersToTeacher() {
       // localStorage에 저장
       localStorage.setItem(TEACHER_DASHBOARD_DATA_KEY, JSON.stringify(existingData));
       
-      console.log('Data saved to teacher dashboard:', studentData);
+      console.log('Data saved to localStorage:', studentData);
       
-      // 성공 메시지 표시
-      submitBtn.textContent = '✓ 제출 완료';
-      submitBtn.style.backgroundColor = '#16a34a';
-      showResponseMessage('success', 
-        `교사에게 제출 완료!\n\n` +
-        `학생: ${studentInfo.studentName} (${studentInfo.studentId})\n` +
-        `완료된 단계: ${completedSteps}/9개\n\n` +
-        `교사용 대시보드에서 확인할 수 있습니다.`
-      );
+      // 2. Apps Script로 모든 단계 데이터 전송
+      console.log('Sending data to Apps Script...');
+      const sendPromises = [];
+      
+      for (let step = 1; step <= 9; step++) {
+        const stepContent = steps[step] || '';
+        sendPromises.push(
+          saveToSheet({
+            studentId: studentInfo.studentId,
+            studentName: studentInfo.studentName,
+            step: step,
+            answer: stepContent
+          })
+        );
+      }
+      
+      // 모든 요청이 완료될 때까지 대기
+      const results = await Promise.allSettled(sendPromises);
+      
+      // 결과 확인
+      const successCount = results.filter(r => r.status === 'fulfilled' && r.value?.success).length;
+      const failCount = results.length - successCount;
+      
+      console.log(`Apps Script 전송 결과: ${successCount}개 성공, ${failCount}개 실패`);
+      
+      if (successCount > 0) {
+        // 성공 메시지 표시
+        submitBtn.textContent = '✓ 제출 완료';
+        submitBtn.style.backgroundColor = '#16a34a';
+        showResponseMessage('success', 
+          `교사에게 제출 완료!\n\n` +
+          `학생: ${studentInfo.studentName} (${studentInfo.studentId})\n` +
+          `완료된 단계: ${completedSteps}/9개\n` +
+          `Apps Script 전송: ${successCount}/9개 성공\n\n` +
+          `교사용 대시보드에서 확인할 수 있습니다.`
+        );
+      } else {
+        // localStorage에는 저장되었지만 Apps Script 전송 실패
+        submitBtn.textContent = '⚠ 부분 완료';
+        submitBtn.style.backgroundColor = '#f59e0b';
+        showResponseMessage('warning', 
+          `localStorage에는 저장되었지만 Apps Script 전송에 실패했습니다.\n\n` +
+          `학생: ${studentInfo.studentName} (${studentInfo.studentId})\n` +
+          `완료된 단계: ${completedSteps}/9개\n\n` +
+          `네트워크 연결을 확인하고 다시 시도해주세요.`
+        );
+      }
       
       setTimeout(() => {
         submitBtn.textContent = originalText;
@@ -711,6 +749,17 @@ function showAPIKeySettings() {
 function createHeader() {
   const header = document.createElement('header');
   header.className = 'bg-gradient-to-r from-blue-600 to-purple-600 text-white py-6 shadow-lg relative';
+  
+  // 교사용 대시보드 아이콘 (오른쪽 상단)
+  const teacherDashboardBtn = document.createElement('a');
+  teacherDashboardBtn.href = '/teacher-dashboard.html';
+  teacherDashboardBtn.className = 'teacher-dashboard-btn';
+  teacherDashboardBtn.style.position = 'absolute';
+  teacherDashboardBtn.style.top = '16px';
+  teacherDashboardBtn.style.right = '16px';
+  teacherDashboardBtn.style.zIndex = '10';
+  teacherDashboardBtn.innerHTML = '👨‍🏫 교사용 대시보드';
+  header.appendChild(teacherDashboardBtn);
   
   const container = document.createElement('div');
   container.className = 'container mx-auto px-4';
