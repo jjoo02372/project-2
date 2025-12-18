@@ -11,61 +11,111 @@ const stepGuides = [
   { id: 9, title: '참고 문헌', icon: '📖' }
 ];
 
-const TEACHER_DASHBOARD_DATA_KEY = 'teacherDashboardData';
-const DEV = true; // 개발 모드 플래그
+// Google Apps Script URL (학생 페이지와 동일)
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_PsbLZpDxaWZWA1zRcjLESqPV2ktxmYIvu4WdM7tHAFE8y-qIRmDgbdaQcvB9KYQexA/exec";
 
 // Dashboard State
 let currentView = 'list'; // 'list' or 'detail'
 let selectedStudentKey = null;
 let scienceReports = {};
+let isLoading = false;
 
-// Load teacher dashboard data from localStorage
-function loadTeacherDashboardData() {
+// Load teacher dashboard data from Apps Script (GET request)
+async function loadTeacherDashboardData() {
+  if (isLoading) {
+    console.log('Already loading data, skipping...');
+    return;
+  }
+  
+  isLoading = true;
   try {
-    console.log('=== Teacher Dashboard Debug ===');
-    console.log('All localStorage keys:', Object.keys(localStorage));
+    console.log('=== Loading data from Apps Script ===');
+    console.log('Script URL:', SCRIPT_URL);
     
-    const data = localStorage.getItem(TEACHER_DASHBOARD_DATA_KEY);
-    console.log('Looking for key:', TEACHER_DASHBOARD_DATA_KEY);
-    console.log('Found data:', data ? 'Yes' : 'No');
+    // GET 요청으로 모든 학생 데이터 가져오기
+    const response = await fetch(SCRIPT_URL, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
     
-    if (data) {
-      const rawData = JSON.parse(data);
-      console.log('Raw data:', rawData);
-      
-      // 데이터 구조 변환: { studentId: {...} } -> { studentId|studentName: {...} }
-      scienceReports = {};
+    console.log('Response status:', response.status);
+    console.log('Response ok:', response.ok);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    // 응답 텍스트 먼저 확인
+    const responseText = await response.text();
+    console.log('Response text (first 500 chars):', responseText.substring(0, 500));
+    
+    // JSON 파싱 시도
+    let rawData;
+    try {
+      rawData = JSON.parse(responseText);
+      console.log('Parsed JSON data:', rawData);
+    } catch (e) {
+      console.error('Failed to parse JSON:', e);
+      throw new Error('Invalid JSON response from server');
+    }
+    
+    // 데이터 구조 변환: Apps Script에서 받은 데이터를 내부 형식으로 변환
+    // Apps Script는 { studentId: { studentId, studentName, step1, step2, ..., step9, updatedAt } } 형식으로 반환
+    scienceReports = {};
+    
+    if (rawData && typeof rawData === 'object') {
       Object.keys(rawData).forEach(studentId => {
         const student = rawData[studentId];
+        
+        // 필수 필드 확인
+        if (!student.studentId || !student.studentName) {
+          console.warn('Invalid student data (missing studentId or studentName):', student);
+          return;
+        }
+        
         const studentKey = `${student.studentId}|${student.studentName}`;
         
         // steps 객체로 변환
         const steps = {};
+        let completedCount = 0;
         for (let i = 1; i <= 9; i++) {
           const stepKey = `step${i}`;
-          if (student[stepKey] && student[stepKey].trim()) {
-            steps[i] = student[stepKey].trim();
+          const stepContent = student[stepKey];
+          if (stepContent && stepContent.trim()) {
+            steps[i] = stepContent.trim();
+            completedCount++;
           }
         }
         
         scienceReports[studentKey] = {
           studentId: student.studentId,
           studentName: student.studentName,
-          updatedAt: student.updatedAt,
-          completedSteps: student.completedSteps || Object.keys(steps).length,
+          updatedAt: student.updatedAt || student.submittedAt || new Date().toISOString(),
+          completedSteps: student.completedSteps || completedCount,
           steps: steps
         };
       });
-      
-      console.log('Converted scienceReports:', scienceReports);
-      console.log('Student count:', Object.keys(scienceReports).length);
-    } else {
-      scienceReports = {};
-      console.log('No data found in teacherDashboardData');
     }
+    
+    console.log('Converted scienceReports:', scienceReports);
+    console.log('Student count:', Object.keys(scienceReports).length);
+    
   } catch (error) {
-    console.error('Failed to load teacher dashboard data:', error);
+    console.error('Failed to load teacher dashboard data from Apps Script:', error);
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    
+    // 에러 발생 시 빈 객체로 초기화
     scienceReports = {};
+    
+    // 에러 메시지를 화면에 표시 (renderList에서 처리)
+  } finally {
+    isLoading = false;
   }
 }
 
@@ -81,59 +131,9 @@ function getCompletedStepsCount(studentKey) {
   return student.completedSteps || (student.steps ? Object.keys(student.steps).length : 0);
 }
 
-// Generate sample data for testing
-function generateSampleData() {
-  const sampleData = {
-    '101': {
-      studentId: '101',
-      studentName: '김철수',
-      step1: '식물의 광합성에 미치는 빛의 색깔의 영향에 대해 탐구하고자 합니다.',
-      step2: '일상생활에서 식물을 키우다가 빛의 색깔이 성장에 영향을 미칠 수 있다는 생각이 들었습니다.',
-      step3: '빛의 색깔에 따라 식물의 광합성 속도가 달라질 것이다.',
-      step4: '독립변인: 빛의 색깔(빨강, 파랑, 초록), 종속변인: 식물의 성장 속도, 통제변인: 온도, 물의 양, 식물 종류',
-      step5: '같은 종류의 식물 3개를 준비하고, 각각 다른 색깔의 필터를 씌워 2주간 관찰합니다.',
-      step6: '빨강 필터: 5cm 성장, 파랑 필터: 7cm 성장, 초록 필터: 3cm 성장',
-      step7: '파랑 빛에서 가장 빠르게 성장했고, 초록 빛에서 가장 느리게 성장했습니다.',
-      step8: '파랑 빛이 식물의 광합성에 가장 효과적이며, 초록 빛은 식물이 흡수하기 어려운 빛입니다.',
-      step9: '실험 결과를 바탕으로 식물 재배 시 적절한 빛의 색깔을 선택하는 것이 중요함을 알 수 있습니다.',
-      completedSteps: 9,
-      updatedAt: new Date().toISOString()
-    },
-    '102': {
-      studentId: '102',
-      studentName: '이영희',
-      step1: '물의 온도가 얼음이 얼 때까지 걸리는 시간에 미치는 영향',
-      step2: '겨울에 물이 얼 때 온도에 따라 얼음이 얼 때까지 걸리는 시간이 다를 것 같아서 궁금했습니다.',
-      step3: '물의 온도가 낮을수록 얼음이 얼 때까지 걸리는 시간이 짧아질 것이다.',
-      step4: '독립변인: 물의 초기 온도, 종속변인: 얼음이 얼 때까지 걸리는 시간',
-      step5: '다양한 온도의 물을 준비하여 냉동실에 넣고 시간을 측정합니다.',
-      step6: '20도: 2시간, 10도: 1시간, 5도: 30분',
-      step7: '온도가 낮을수록 더 빨리 얼었습니다.',
-      step8: '물의 초기 온도가 낮을수록 얼음이 되는 데 걸리는 시간이 짧아집니다.',
-      step9: '실험을 통해 온도와 상태 변화의 관계를 이해할 수 있었습니다.',
-      completedSteps: 9,
-      updatedAt: new Date(Date.now() - 3600000).toISOString()
-    },
-    '103': {
-      studentId: '103',
-      studentName: '박민수',
-      step1: '탄산음료의 종류에 따른 이산화탄소 발생량 비교',
-      step2: '탄산음료를 마시다가 종류에 따라 탄산의 양이 다른 것 같아서 궁금했습니다.',
-      step3: '탄산음료의 종류에 따라 이산화탄소 발생량이 다를 것이다.',
-      step4: '독립변인: 탄산음료 종류, 종속변인: 이산화탄소 발생량',
-      step5: '다양한 탄산음료를 준비하고 각각에서 발생하는 이산화탄소를 측정합니다.',
-      step6: '',
-      step7: '',
-      step8: '',
-      step9: '',
-      completedSteps: 5,
-      updatedAt: new Date(Date.now() - 7200000).toISOString()
-    }
-  };
-  
-  localStorage.setItem(TEACHER_DASHBOARD_DATA_KEY, JSON.stringify(sampleData));
-  console.log('Sample data generated:', sampleData);
-  loadTeacherDashboardData();
+// Refresh button handler
+async function refreshData() {
+  await loadTeacherDashboardData();
   renderList();
 }
 
@@ -152,26 +152,24 @@ function renderList() {
           <h1>📊 교사 대시보드</h1>
           <div class="student-count">학생 수: <strong>${studentCount}</strong>명</div>
         </div>
-        ${DEV ? '<button class="btn-dev" onclick="generateSampleData()">🧪 샘플 데이터 생성</button>' : ''}
+        <button class="btn-refresh" onclick="refreshData()">🔄 새로고침</button>
       </header>
       
       <div class="dashboard-content">
   `;
   
-  if (studentCount === 0) {
-    const allKeys = Object.keys(localStorage);
-    const teacherDashboardData = localStorage.getItem(TEACHER_DASHBOARD_DATA_KEY);
-    
+  if (isLoading) {
+    html += `
+      <div class="empty-state">
+        <p><strong>데이터를 불러오는 중...</strong></p>
+      </div>
+    `;
+  } else if (studentCount === 0) {
     html += `
       <div class="empty-state">
         <p><strong>아직 제출한 학생이 없습니다.</strong></p>
-        <div class="debug-info">
-          <h3>디버깅 정보</h3>
-          <p><strong>찾은 키:</strong> ${TEACHER_DASHBOARD_DATA_KEY}</p>
-          <p><strong>데이터 존재:</strong> ${teacherDashboardData ? '예' : '아니오'}</p>
-          <p><strong>전체 localStorage 키 수:</strong> ${allKeys.length}</p>
-          ${DEV ? '<p><button class="btn-dev-small" onclick="generateSampleData()">샘플 데이터 생성하여 테스트</button></p>' : ''}
-        </div>
+        <p style="margin-top: 16px; color: #666;">Apps Script에서 데이터를 가져오는 중 오류가 발생했거나, 실제로 제출된 데이터가 없을 수 있습니다.</p>
+        <p style="margin-top: 8px; color: #666;">브라우저 콘솔을 확인하여 자세한 오류 정보를 확인하세요.</p>
       </div>
     `;
   } else {
@@ -471,31 +469,33 @@ function escapeHtml(text) {
 window.renderList = renderList;
 window.renderDetail = renderDetail;
 window.showEvaluation = showEvaluation;
-window.generateSampleData = generateSampleData;
+window.refreshData = refreshData;
 
 // Initialize dashboard when DOM is ready
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', function() {
-    loadTeacherDashboardData();
+  document.addEventListener('DOMContentLoaded', async function() {
+    await loadTeacherDashboardData();
     renderList();
     
-    // Refresh data periodically (every 5 seconds)
-    setInterval(() => {
-      if (currentView === 'list') {
-        loadTeacherDashboardData();
+    // Refresh data periodically (every 30 seconds)
+    setInterval(async () => {
+      if (currentView === 'list' && !isLoading) {
+        await loadTeacherDashboardData();
         renderList();
       }
-    }, 5000);
+    }, 30000);
   });
 } else {
-  loadTeacherDashboardData();
-  renderList();
-  
-  // Refresh data periodically (every 5 seconds)
-  setInterval(() => {
-    if (currentView === 'list') {
-      loadTeacherDashboardData();
-      renderList();
-    }
-  }, 5000);
+  (async function() {
+    await loadTeacherDashboardData();
+    renderList();
+    
+    // Refresh data periodically (every 30 seconds)
+    setInterval(async () => {
+      if (currentView === 'list' && !isLoading) {
+        await loadTeacherDashboardData();
+        renderList();
+      }
+    }, 30000);
+  })();
 }
