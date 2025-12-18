@@ -715,16 +715,6 @@ function createHeader() {
   const container = document.createElement('div');
   container.className = 'container mx-auto px-4';
   
-  // 교사용 대시보드 버튼 (오른쪽 상단)
-  const teacherDashboardBtn = document.createElement('a');
-  teacherDashboardBtn.href = '/teacher-dashboard.html';
-  teacherDashboardBtn.className = 'teacher-dashboard-btn';
-  teacherDashboardBtn.style.position = 'absolute';
-  teacherDashboardBtn.style.top = '16px';
-  teacherDashboardBtn.style.right = '16px';
-  teacherDashboardBtn.style.zIndex = '10';
-  teacherDashboardBtn.innerHTML = '👨‍🏫 교사용 대시보드';
-  
   const h1 = document.createElement('h1');
   h1.className = 'text-3xl font-bold text-center flex items-center justify-center gap-2';
   h1.innerHTML = '<span>🔬</span> 과학 탐구 보고서 도우미';
@@ -736,7 +726,6 @@ function createHeader() {
   container.appendChild(h1);
   container.appendChild(p);
   header.appendChild(container);
-  header.appendChild(teacherDashboardBtn);
   
   return header;
 }
