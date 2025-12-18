@@ -10,7 +10,7 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #ffffff;
+  background-color: #f3f4f6;
   color: #111827;
 }
 
@@ -21,15 +21,15 @@ body {
 }
 
 .dashboard-header {
-  background: #ffffff;
-  color: #111827;
+  background: linear-gradient(135deg, #9333ea 0%, #2563eb 100%);
+  color: white;
   padding: 24px 32px;
-  border-radius: 0;
+  border-radius: 12px;
   margin-bottom: 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 .dashboard-header > div {
@@ -41,7 +41,7 @@ body {
 .dashboard-header h1 {
   font-size: 28px;
   font-weight: 700;
-  color: #111827;
+  color: white;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -53,22 +53,22 @@ body {
 }
 
 .student-count {
-  font-size: 16px;
-  color: #6b7280;
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.9);
   margin-top: 4px;
 }
 
 .student-count strong {
-  font-size: 18px;
-  color: #111827;
-  font-weight: 600;
+  font-size: 24px;
+  color: #fbbf24;
+  font-weight: 700;
 }
 
 .dashboard-content {
   background: white;
-  border-radius: 0;
+  border-radius: 12px;
   padding: 24px;
-  box-shadow: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   min-height: 400px;
 }
 
@@ -80,40 +80,40 @@ body {
 }
 
 .btn-sample {
-  padding: 8px 16px;
-  border-radius: 6px;
-  border: 1px solid #e5e7eb;
-  background: #ffffff;
-  color: #111827;
-  font-weight: 500;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: none;
+  background: #10b981;
+  color: white;
+  font-weight: 600;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .btn-sample:hover {
-  background: #f9fafb;
-  transform: none;
-  box-shadow: none;
+  background: #059669;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
 }
 
 .btn-refresh {
-  padding: 8px 16px;
-  border-radius: 6px;
-  border: 1px solid #e5e7eb;
-  background: #ffffff;
-  color: #111827;
-  font-weight: 500;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  font-weight: 600;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s;
-  margin-right: 8px;
+  margin-right: 12px;
 }
 
 .btn-refresh:hover {
-  background: #f9fafb;
-  transform: none;
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
 }
 
 @keyframes spin {
@@ -166,9 +166,25 @@ body {
 
 .progress-text {
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   color: #6b7280;
   min-width: 60px;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 24px;
+  background: #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  max-width: 400px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #10b981;
+  transition: width 0.3s ease;
+  border-radius: 12px;
 }
 
 .updated-at {
@@ -184,21 +200,24 @@ body {
 .btn-view,
 .btn-back,
 .btn-evaluate {
-  padding: 8px 16px;
-  border-radius: 6px;
-  border: 1px solid #e5e7eb;
-  background: #ffffff;
-  color: #111827;
-  font-weight: 500;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: none;
+  font-weight: 600;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
+.btn-view {
+  background: #2563eb;
+  color: white;
+}
+
 .btn-view:hover {
-  background: #f9fafb;
-  transform: none;
-  box-shadow: none;
+  background: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(37, 99, 235, 0.3);
 }
 
 .btn-back {
