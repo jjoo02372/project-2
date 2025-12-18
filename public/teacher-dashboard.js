@@ -382,9 +382,6 @@ function renderList() {
             <h3>${studentDisplay}</h3>
             <div class="progress-info">
               <span class="progress-text">${completedCount}/9 완료</span>
-              <div class="progress-bar">
-                <div class="progress-fill" style="width: ${progressPercent}%"></div>
-              </div>
             </div>
             <div class="updated-at">최신 제출: ${updatedAt}</div>
           </div>
