@@ -20,9 +20,10 @@
         background: linear-gradient(135deg, #e8e3f5 0%, #f5f1ff 25%, #fff5f5 50%, #f0f9ff 75%, #e8e3f5 100%);
         min-height: 100vh;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        padding: 20px;
+        padding: 20px 20px 0;
         position: relative;
         overflow: hidden;
       }
@@ -205,6 +206,45 @@
         box-shadow: 0 4px 8px rgba(147, 51, 234, 0.3);
       }
 
+      /* 푸터 */
+      .site-footer {
+        width: 100%;
+        margin-top: auto;
+        padding: 28px 20px 24px;
+        text-align: center;
+        background: linear-gradient(180deg, transparent 0%, rgba(90, 74, 122, 0.08) 100%);
+        color: #8d7fb5;
+        font-size: 12px;
+        line-height: 1.9;
+        position: relative;
+        z-index: 1;
+      }
+
+      .footer-links {
+        margin-bottom: 2px;
+      }
+
+      .footer-links a {
+        color: #6b5b95;
+        text-decoration: none;
+        transition: color 0.2s;
+      }
+
+      .footer-links a:hover {
+        color: #5a4a7a;
+        text-decoration: underline;
+      }
+
+      .footer-divider {
+        margin: 0 6px;
+        color: #c4b5e0;
+      }
+
+      .footer-copy {
+        color: #a99bc7;
+        font-size: 11px;
+      }
+
       @media (max-width: 600px) {
         .cover-container {
           padding: 40px 24px;
@@ -220,6 +260,15 @@
 
         .cover-icons {
           font-size: 48px;
+        }
+
+        .site-footer {
+          font-size: 11px;
+          padding: 20px 12px 16px;
+        }
+
+        .footer-copy {
+          font-size: 10px;
         }
       }
     </style>
@@ -241,6 +290,17 @@
         </div>
       </div>
     </div>
+
+    <footer class="site-footer">
+      <div class="footer-links">
+        <a href="#">이용약관</a>
+        <span class="footer-divider">│</span>
+        <a href="#">개인정보처리방침</a>
+        <span class="footer-divider">│</span>
+        <span>정보관리책임자: 수업 담당 교사</span>
+      </div>
+      <div class="footer-copy">&copy; 2026 조른의 과학 실험실. All rights reserved.</div>
+    </footer>
 
     <script type="module">
       import { initGoogleSignIn, isLoggedIn } from './src/auth.js';
