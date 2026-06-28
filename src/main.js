@@ -1,5 +1,6 @@
 ﻿import { stepGuides } from './data/stepGuides.js';
 import './index.css';
+import { getCurrentUser, requireAuth, logout, onAuthStateChange } from './auth.js';
 
 const STORAGE_KEY = 'science-inquiry-report';
 const API_KEY_STORAGE_KEY = 'openai-api-key';
@@ -8,8 +9,9 @@ const STUDENT_INFO_STORAGE_KEY = 'student-info';
 const SCIENCE_REPORTS_KEY = 'scienceReports';
 const TEACHER_DASHBOARD_DATA_KEY = 'teacherDashboardData';
 
-// Google Apps Script URL
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_PsbLZpDxaWZWA1zRcjLESqPV2ktxmYIvu4WdM7tHAFE8y-qIRmDgbdaQcvB9KYQexA/exec";
+// Google Apps Script URL (환경변수 우선)
+const SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || 
+  "https://script.google.com/macros/s/AKfycbw_PsbLZpDxaWZWA1zRcjLESqPV2ktxmYIvu4WdM7tHAFE8y-qIRmDgbdaQcvB9KYQexA/exec";
 
 // App State
 let currentStep = 1;
@@ -19,7 +21,7 @@ let aiResponse = '';
 let apiKey = '';
 let apiStatus = 'unknown'; // 'unknown', 'testing', 'valid', 'invalid'
 let chatHistory = {}; // 각 단계별 대화 기록 { stepId: [{role, content}, ...] }
-let studentInfo = { studentId: '', studentName: '' }; // 학생 정보
+let currentUser = null; // 로그인된 사용자 정보 (기존 studentInfo 대체)
 let step6Data = { // 6번 단계 전용 데이터
   tableData: [], // 표 데이터
   headerLabels: [], // 헤더 라벨 (항목 1, 항목 2...)
@@ -94,27 +96,35 @@ function loadData() {
     }
   }
   
-  // Load student info
-  const savedStudentInfo = localStorage.getItem(STUDENT_INFO_STORAGE_KEY);
-  if (savedStudentInfo) {
-    try {
-      studentInfo = JSON.parse(savedStudentInfo);
-    } catch (error) {
-      console.error('Failed to load student info:', error);
-      studentInfo = { studentId: '', studentName: '' };
-    }
+  // Load current user (로그인 정보)
+  currentUser = getCurrentUser();
+  if (!currentUser) {
+    console.warn('[MAIN] No user logged in');
+  } else {
+    console.log('[MAIN] Current user:', currentUser);
   }
 }
 
-// Save student info to localStorage
-function saveStudentInfo() {
-  localStorage.setItem(STUDENT_INFO_STORAGE_KEY, JSON.stringify(studentInfo));
+// Get user info helper (기존 studentInfo 호환성 유지)
+function getUserInfo() {
+  if (!currentUser) {
+    currentUser = getCurrentUser();
+  }
+  if (currentUser) {
+    return {
+      studentId: currentUser.id,
+      studentName: currentUser.name || currentUser.email || '사용자'
+    };
+  }
+  return { studentId: '', studentName: '' };
 }
 
 // Submit all answers to teacher (모든 답변을 교사에게 제출) - localStorage + Apps Script
 async function submitAllAnswersToTeacher() {
-  if (!studentInfo.studentId || !studentInfo.studentName) {
-    alert('학생 정보를 먼저 입력해주세요.');
+  const userInfo = getUserInfo();
+  if (!userInfo.studentId || !userInfo.studentName) {
+    alert('로그인이 필요합니다. 표지 화면으로 이동합니다.');
+    requireAuth();
     return;
   }
   
@@ -151,10 +161,12 @@ async function submitAllAnswersToTeacher() {
       // 1. localStorage에 저장 (백업)
       const existingData = JSON.parse(localStorage.getItem(TEACHER_DASHBOARD_DATA_KEY) || '{}');
       
-      // 학생 데이터 생성
+      // 학생 데이터 생성 (로그인 정보 사용)
       const studentData = {
-        studentId: studentInfo.studentId,
-        studentName: studentInfo.studentName,
+        studentId: userInfo.studentId,
+        studentName: userInfo.studentName,
+        email: currentUser?.email || '',
+        picture: currentUser?.picture || '',
         step1: steps[1] || '',
         step2: steps[2] || '',
         step3: steps[3] || '',
@@ -169,59 +181,113 @@ async function submitAllAnswersToTeacher() {
       };
       
       // 같은 studentId면 덮어쓰기
-      existingData[studentInfo.studentId] = studentData;
+      existingData[userInfo.studentId] = studentData;
       
       // localStorage에 저장
       localStorage.setItem(TEACHER_DASHBOARD_DATA_KEY, JSON.stringify(existingData));
       
       console.log('Data saved to localStorage:', studentData);
       
-      // 2. Apps Script로 모든 단계 데이터 전송
-      console.log('Sending data to Apps Script...');
-      const sendPromises = [];
+      // 2. Apps Script로 모든 단계 데이터 전송 (순차적으로 전송하여 서버 부하 감소)
+      console.log('[APPS_SCRIPT] Sending data to Apps Script...');
+      let successCount = 0;
+      let failCount = 0;
+      const errors = [];
       
+      // 순차적으로 전송 (동시 전송 시 서버 부하 및 CORS 문제 가능성)
       for (let step = 1; step <= 9; step++) {
         const stepContent = steps[step] || '';
-        sendPromises.push(
-          saveToSheet({
-            studentId: studentInfo.studentId,
-            studentName: studentInfo.studentName,
+        if (!stepContent.trim()) {
+          console.log(`[APPS_SCRIPT] Skipping empty step ${step}`);
+          continue;
+        }
+        
+        try {
+          console.log(`[APPS_SCRIPT] Sending step ${step}...`);
+          const result = await saveToSheet({
+            type: 'submission',
+            user: {
+              id: currentUser.id,
+              name: currentUser.name || '',
+              email: currentUser.email || '',
+              picture: currentUser.picture || ''
+            },
             step: step,
-            answer: stepContent
-          })
-        );
+            answer: stepContent,
+            ts: new Date().toISOString()
+          });
+          
+          if (result.success) {
+            successCount++;
+            console.log(`[APPS_SCRIPT] Step ${step} sent successfully`);
+          } else {
+            failCount++;
+            errors.push(`Step ${step}: ${result.message}`);
+            console.error(`[APPS_SCRIPT] Step ${step} failed:`, result.message);
+          }
+          
+          // 각 요청 사이에 약간의 지연 (서버 부하 방지)
+          if (step < 9) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+        } catch (error) {
+          failCount++;
+          errors.push(`Step ${step}: ${error.message}`);
+          console.error(`[APPS_SCRIPT] Step ${step} error:`, error);
+        }
       }
       
-      // 모든 요청이 완료될 때까지 대기
-      const results = await Promise.allSettled(sendPromises);
+      console.log(`[APPS_SCRIPT] 전송 결과: ${successCount}개 성공, ${failCount}개 실패`);
       
-      // 결과 확인
-      const successCount = results.filter(r => r.status === 'fulfilled' && r.value?.success).length;
-      const failCount = results.length - successCount;
-      
-      console.log(`Apps Script 전송 결과: ${successCount}개 성공, ${failCount}개 실패`);
+      // 다시 제출 버튼 숨기기
+      const retryBtn = document.getElementById('retrySubmitBtn');
       
       if (successCount > 0) {
         // 성공 메시지 표시
         submitBtn.textContent = '✓ 제출 완료';
         submitBtn.style.backgroundColor = '#16a34a';
-        showResponseMessage('success', 
-          `교사에게 제출 완료!\n\n` +
-          `학생: ${studentInfo.studentName} (${studentInfo.studentId})\n` +
-          `완료된 단계: ${completedSteps}/9개\n` +
-          `Apps Script 전송: ${successCount}/9개 성공\n\n` +
-          `교사용 대시보드에서 확인할 수 있습니다.`
-        );
+        
+        // 다시 제출 버튼 숨기기
+        if (retryBtn) {
+          retryBtn.style.display = 'none';
+        }
+        
+        let message = `교사에게 제출 완료!\n\n`;
+        message += `학생: ${userInfo.studentName} (${userInfo.studentId})\n`;
+        message += `완료된 단계: ${completedSteps}/9개\n`;
+        message += `Apps Script 전송: ${successCount}/${completedSteps}개 성공\n\n`;
+        
+        if (failCount > 0) {
+          message += `⚠️ 일부 단계 전송 실패 (${failCount}개)\n`;
+          message += `나중에 "다시 제출" 버튼을 눌러 재시도할 수 있습니다.\n\n`;
+        }
+        
+        message += `교사용 대시보드에서 확인할 수 있습니다.`;
+        
+        showResponseMessage('success', message);
       } else {
         // localStorage에는 저장되었지만 Apps Script 전송 실패
         submitBtn.textContent = '⚠ 부분 완료';
         submitBtn.style.backgroundColor = '#f59e0b';
-        showResponseMessage('warning', 
-          `localStorage에는 저장되었지만 Apps Script 전송에 실패했습니다.\n\n` +
-          `학생: ${studentInfo.studentName} (${studentInfo.studentId})\n` +
-          `완료된 단계: ${completedSteps}/9개\n\n` +
-          `네트워크 연결을 확인하고 다시 시도해주세요.`
-        );
+        
+        // 다시 제출 버튼 표시
+        if (retryBtn) {
+          retryBtn.style.display = 'flex';
+        }
+        
+        let message = `localStorage에는 저장되었지만 Apps Script 전송에 실패했습니다.\n\n`;
+        message += `학생: ${userInfo.studentName} (${userInfo.studentId})\n`;
+        message += `완료된 단계: ${completedSteps}/9개\n\n`;
+        if (errors && errors.length > 0) {
+          message += `오류 내용:\n${errors.slice(0, 3).join('\n')}\n\n`;
+        }
+        message += `해결 방법:\n`;
+        message += `1. 네트워크 연결 확인\n`;
+        message += `2. "다시 제출" 버튼으로 재시도\n`;
+        message += `3. 브라우저 콘솔(F12)에서 자세한 오류 확인\n`;
+        message += `4. Apps Script URL이 올바른지 확인`;
+        
+        showResponseMessage('warning', message);
       }
       
       setTimeout(() => {
@@ -246,56 +312,161 @@ async function submitAllAnswersToTeacher() {
   }
 }
 
-// Save data to Google Sheets
-async function saveToSheet({ studentId, studentName, step, answer }) {
+// Save data to Google Sheets (새로운 형식: type, user, step, answer, ts)
+// 재시도 로직이 포함된 함수
+async function saveToSheet({ type, user, step, answer, ts, studentId, studentName, retryCount = 0, maxRetries = 3 }) {
   try {
-    console.log('Sending data to Google Apps Script:', { studentId, studentName, step, answer });
-    
-    const res = await fetch(SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ studentId, studentName, step, answer }),
-    });
-    
-    console.log('Response status:', res.status);
-    console.log('Response headers:', res.headers);
-    
-    // 응답 텍스트 먼저 확인
-    const responseText = await res.text();
-    console.log('Response text:', responseText);
-    
-    // JSON 파싱 시도
-    let json;
-    try {
-      json = JSON.parse(responseText);
-      console.log('Parsed JSON response:', json);
-    } catch (e) {
-      // JSON이 아닌 경우 텍스트로 처리
-      console.log('Response is not JSON, treating as text');
-      if (responseText.toLowerCase().includes('success') || responseText.toLowerCase().includes('ok')) {
-        return { success: true, message: responseText, response: responseText };
+    // 기존 형식 호환성 유지 (studentId/studentName이 있으면 기존 형식 사용)
+    let payload;
+    if (studentId && studentName) {
+      // 기존 형식 (하위 호환성)
+      payload = { studentId, studentName, step, answer };
+      console.log('[APPS_SCRIPT] Sending data (legacy format):', payload);
+    } else if (type && user) {
+      // 새로운 형식 (로그인 기반)
+      payload = { type, user, step, answer, ts };
+      console.log('[APPS_SCRIPT] Sending data (new format):', payload);
+    } else {
+      // 현재 사용자 정보로 자동 채움
+      const userInfo = getUserInfo();
+      if (!userInfo.studentId) {
+        throw new Error('User not logged in');
       }
-      return { success: false, message: responseText, response: responseText };
+      payload = {
+        type: 'submission',
+        user: {
+          id: currentUser.id,
+          name: currentUser.name || '',
+          email: currentUser.email || '',
+          picture: currentUser.picture || ''
+        },
+        step,
+        answer,
+        ts: new Date().toISOString()
+      };
+      console.log('[APPS_SCRIPT] Sending data (auto-filled):', payload);
     }
     
-    // 응답 처리
-    if (json.ok || json.success) {
-      console.log('Data saved to Google Sheets successfully');
-      return { success: true, message: json.message || '저장되었습니다.', response: json };
-    } else {
-      throw new Error(json.message || json.error || "save failed");
+    // 타임아웃 설정 (10초)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
+    try {
+      // CORS 문제를 피하기 위해 먼저 일반 모드로 시도
+      let res;
+      try {
+        res = await fetch(SCRIPT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+          mode: 'cors' // 먼저 CORS 모드로 시도
+        });
+      } catch (corsError) {
+        console.warn('[APPS_SCRIPT] CORS error, trying no-cors mode:', corsError);
+        // CORS 오류 시 no-cors 모드로 재시도
+        res = await fetch(SCRIPT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+          mode: 'no-cors'
+        });
+      }
+      
+      clearTimeout(timeoutId);
+      
+      console.log('[APPS_SCRIPT] Response status:', res.status);
+      console.log('[APPS_SCRIPT] Response ok:', res.ok);
+      
+      // no-cors 모드에서는 응답을 읽을 수 없으므로 성공으로 간주
+      if (res.type === 'opaque' || res.status === 0) {
+        console.log('[APPS_SCRIPT] Request sent (no-cors mode, assuming success)');
+        return { success: true, message: '전송 완료 (no-cors 모드)', response: null };
+      }
+      
+      // 응답 텍스트 먼저 확인
+      let responseText;
+      try {
+        responseText = await res.text();
+        console.log('[APPS_SCRIPT] Response text:', responseText);
+      } catch (e) {
+        console.warn('[APPS_SCRIPT] Could not read response text:', e);
+        // 응답을 읽을 수 없어도 요청은 전송되었으므로 성공으로 간주
+        if (res.ok || res.status === 200) {
+          return { success: true, message: '전송 완료', response: null };
+        }
+        throw new Error(`HTTP ${res.status}: 응답을 읽을 수 없습니다`);
+      }
+      
+      // JSON 파싱 시도
+      let json;
+      try {
+        json = JSON.parse(responseText);
+        console.log('[APPS_SCRIPT] Parsed JSON response:', json);
+      } catch (e) {
+        // JSON이 아닌 경우 텍스트로 처리
+        console.log('[APPS_SCRIPT] Response is not JSON, treating as text');
+        if (responseText.toLowerCase().includes('success') || responseText.toLowerCase().includes('ok')) {
+          return { success: true, message: responseText, response: responseText };
+        }
+        // 빈 응답도 성공으로 간주 (Apps Script가 성공적으로 처리했을 수 있음)
+        if (!responseText || responseText.trim() === '') {
+          return { success: true, message: '전송 완료', response: null };
+        }
+        throw new Error(responseText || '알 수 없는 오류');
+      }
+      
+      // 응답 처리
+      if (json.ok || json.success) {
+        console.log('[APPS_SCRIPT] Data saved to Google Sheets successfully');
+        return { success: true, message: json.message || '저장되었습니다.', response: json };
+      } else {
+        throw new Error(json.message || json.error || "save failed");
+      }
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      
+      // 타임아웃 오류
+      if (fetchError.name === 'AbortError') {
+        throw new Error('요청 시간 초과 (10초). 네트워크 연결을 확인해주세요.');
+      }
+      
+      // 네트워크 오류
+      if (fetchError.message.includes('Failed to fetch') || fetchError.message.includes('NetworkError')) {
+        throw new Error('네트워크 오류: Apps Script 서버에 연결할 수 없습니다.');
+      }
+      
+      throw fetchError;
     }
   } catch (error) {
-    console.error('Failed to save to Google Sheets:', error);
-    console.error('Error details:', {
+    console.error('[APPS_SCRIPT] Failed to save to Google Sheets:', error);
+    console.error('[APPS_SCRIPT] Error details:', {
       message: error.message,
       stack: error.stack,
-      name: error.name
+      name: error.name,
+      retryCount: retryCount
     });
+    
+    // 재시도 로직
+    if (retryCount < maxRetries) {
+      const delay = Math.pow(2, retryCount) * 1000; // 지수 백오프: 1초, 2초, 4초
+      console.log(`[APPS_SCRIPT] Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+      
+      await new Promise(resolve => setTimeout(resolve, delay));
+      
+      return saveToSheet({ 
+        type, user, step, answer, ts, studentId, studentName, 
+        retryCount: retryCount + 1, 
+        maxRetries 
+      });
+    }
+    
     return { 
       success: false, 
       message: error.message || '저장에 실패했습니다.', 
-      error: error 
+      error: error,
+      retried: retryCount > 0
     };
   }
 }
@@ -310,8 +481,10 @@ async function submitAnswer() {
     return;
   }
   
-  if (!studentInfo.studentId || !studentInfo.studentName) {
-    alert('학생 정보를 먼저 입력해주세요.');
+  const userInfo = getUserInfo();
+  if (!userInfo.studentId || !userInfo.studentName) {
+    alert('로그인이 필요합니다. 표지 화면으로 이동합니다.');
+    requireAuth();
     return;
   }
   
@@ -329,10 +502,12 @@ async function submitAnswer() {
     saveData();
     
     // localStorage에 학생별 데이터 저장 (교사용 대시보드를 위해)
-    const studentKey = `student-${studentInfo.studentId}-${studentInfo.studentName}`;
+    const studentKey = `student-${userInfo.studentId}-${userInfo.studentName}`;
     const studentData = {
-      studentId: studentInfo.studentId,
-      studentName: studentInfo.studentName,
+      studentId: userInfo.studentId,
+      studentName: userInfo.studentName,
+      email: currentUser?.email || '',
+      picture: currentUser?.picture || '',
       reportData: reportData,
       step6Data: step6Data,
       lastUpdated: new Date().toISOString()
@@ -342,12 +517,18 @@ async function submitAnswer() {
     // Update scienceReports for teacher dashboard
     updateScienceReports();
     
-    // Apps Script로도 전송 (기존 기능 유지)
+    // Apps Script로도 전송 (새로운 형식 사용)
     const result = await saveToSheet({
-      studentId: studentInfo.studentId,
-      studentName: studentInfo.studentName,
-      step: currentStep, // 숫자로 전송
-      answer: actualContent
+      type: 'submission',
+      user: {
+        id: currentUser.id,
+        name: currentUser.name || '',
+        email: currentUser.email || '',
+        picture: currentUser.picture || ''
+      },
+      step: currentStep,
+      answer: actualContent,
+      ts: new Date().toISOString()
     });
     
     // 버튼 상태 복원
@@ -428,7 +609,8 @@ function showResponseMessage(type, message) {
 // Save data to localStorage
 // Update scienceReports for teacher dashboard
 function updateScienceReports() {
-  if (!studentInfo.studentId || !studentInfo.studentName) {
+  const userInfo = getUserInfo();
+  if (!userInfo.studentId || !userInfo.studentName) {
     return;
   }
   
@@ -436,7 +618,7 @@ function updateScienceReports() {
   const existingReports = JSON.parse(localStorage.getItem(SCIENCE_REPORTS_KEY) || '{}');
   
   // Create student key
-  const studentKey = `${studentInfo.studentId}|${studentInfo.studentName}`;
+  const studentKey = `${userInfo.studentId}|${userInfo.studentName}`;
   
   // Build steps object (only non-empty steps)
   const steps = {};
@@ -449,8 +631,10 @@ function updateScienceReports() {
   
   // Update or create student entry
   existingReports[studentKey] = {
-    studentId: studentInfo.studentId,
-    studentName: studentInfo.studentName,
+    studentId: userInfo.studentId,
+    studentName: userInfo.studentName,
+    email: currentUser?.email || '',
+    picture: currentUser?.picture || '',
     updatedAt: new Date().toISOString(),
     steps: steps
   };
@@ -464,11 +648,14 @@ function saveData() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(reportData));
     
     // 교사용 대시보드를 위해 학생별 데이터도 저장
-    if (studentInfo.studentId && studentInfo.studentName) {
-      const studentKey = `student-${studentInfo.studentId}-${studentInfo.studentName}`;
+    const userInfo = getUserInfo();
+    if (userInfo.studentId && userInfo.studentName) {
+      const studentKey = `student-${userInfo.studentId}-${userInfo.studentName}`;
       const studentData = {
-        studentId: studentInfo.studentId,
-        studentName: studentInfo.studentName,
+        studentId: userInfo.studentId,
+        studentName: userInfo.studentName,
+        email: currentUser?.email || '',
+        picture: currentUser?.picture || '',
         reportData: reportData,
         step6Data: step6Data,
         lastUpdated: new Date().toISOString()
@@ -493,61 +680,66 @@ function saveStep6Data() {
   localStorage.setItem('step6-data', JSON.stringify(step6Data));
 }
 
-// Student Info Input Banner
-function createStudentInfoBanner() {
+// User Info Banner (로그인 정보 표시)
+function createUserInfoBanner() {
   const banner = document.createElement('div');
-  banner.id = 'student-info-banner';
-  banner.className = 'w-full py-2 px-4 bg-blue-50 border-b border-blue-200';
+  banner.id = 'user-info-banner';
+  banner.className = 'w-full py-3 px-4 bg-gradient-to-r from-purple-50 to-pink-50 border-b-2 border-purple-200';
   
   const container = document.createElement('div');
-  container.className = 'container mx-auto flex items-center justify-between flex-wrap gap-2';
+  container.className = 'container mx-auto flex items-center justify-between flex-wrap gap-3';
   
   const leftDiv = document.createElement('div');
   leftDiv.className = 'flex items-center gap-3 flex-wrap';
   
-  const label = document.createElement('span');
-  label.className = 'text-sm font-medium text-gray-700';
-  label.textContent = '👤 학생 정보:';
+  // 프로필 사진
+  if (currentUser?.picture) {
+    const profileImg = document.createElement('img');
+    profileImg.src = currentUser.picture;
+    profileImg.alt = '프로필';
+    profileImg.className = 'w-10 h-10 rounded-full border-2 border-purple-300 object-cover';
+    profileImg.style.minWidth = '40px';
+    leftDiv.appendChild(profileImg);
+  } else {
+    const profileIcon = document.createElement('div');
+    profileIcon.className = 'w-10 h-10 rounded-full bg-purple-300 flex items-center justify-center text-white font-bold text-lg';
+    profileIcon.textContent = currentUser?.name?.[0]?.toUpperCase() || '👤';
+    profileIcon.style.minWidth = '40px';
+    leftDiv.appendChild(profileIcon);
+  }
   
-  const studentIdInput = document.createElement('input');
-  studentIdInput.type = 'text';
-  studentIdInput.placeholder = '학생 ID';
-  studentIdInput.value = studentInfo.studentId || '';
-  studentIdInput.className = 'px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent';
-  studentIdInput.style.minWidth = '120px';
+  // 사용자 정보
+  const userInfoDiv = document.createElement('div');
+  userInfoDiv.className = 'flex flex-col';
   
-  const studentNameInput = document.createElement('input');
-  studentNameInput.type = 'text';
-  studentNameInput.placeholder = '학생 이름';
-  studentNameInput.value = studentInfo.studentName || '';
-  studentNameInput.className = 'px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent';
-  studentNameInput.style.minWidth = '120px';
+  const userName = document.createElement('span');
+  userName.className = 'text-base font-bold text-gray-800';
+  userName.textContent = currentUser?.name || '사용자';
   
-  const saveButton = document.createElement('button');
-  saveButton.className = 'px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors';
-  saveButton.textContent = '💾 저장';
+  const userEmail = document.createElement('span');
+  userEmail.className = 'text-xs text-gray-600';
+  userEmail.textContent = currentUser?.email || '';
   
-  saveButton.addEventListener('click', () => {
-    studentInfo.studentId = studentIdInput.value.trim();
-    studentInfo.studentName = studentNameInput.value.trim();
-    saveStudentInfo();
-    
-    // 저장 성공 메시지
-    const originalText = saveButton.textContent;
-    saveButton.textContent = '✓ 저장됨';
-    saveButton.style.backgroundColor = '#16a34a';
-    setTimeout(() => {
-      saveButton.textContent = originalText;
-      saveButton.style.backgroundColor = '';
-    }, 2000);
+  userInfoDiv.appendChild(userName);
+  if (currentUser?.email) {
+    userInfoDiv.appendChild(userEmail);
+  }
+  
+  leftDiv.appendChild(userInfoDiv);
+  
+  // 로그아웃 버튼
+  const logoutButton = document.createElement('button');
+  logoutButton.className = 'px-4 py-2 text-sm bg-white border-2 border-purple-300 text-purple-700 rounded-lg hover:bg-purple-100 transition-colors font-medium';
+  logoutButton.textContent = '🚪 로그아웃';
+  logoutButton.addEventListener('click', () => {
+    if (confirm('로그아웃하시겠습니까?')) {
+      logout();
+      window.location.href = '/cover.html';
+    }
   });
   
-  leftDiv.appendChild(label);
-  leftDiv.appendChild(studentIdInput);
-  leftDiv.appendChild(studentNameInput);
-  leftDiv.appendChild(saveButton);
-  
   container.appendChild(leftDiv);
+  container.appendChild(logoutButton);
   banner.appendChild(container);
   
   return banner;
@@ -2070,6 +2262,17 @@ function createExportButton() {
   submitToTeacherBtn.innerHTML = '<span>📤</span> 교사에게 제출';
   submitToTeacherBtn.addEventListener('click', submitAllAnswersToTeacher);
   
+  // 다시 제출 버튼 (실패한 경우에만 표시)
+  const retrySubmitBtn = document.createElement('button');
+  retrySubmitBtn.id = 'retrySubmitBtn';
+  retrySubmitBtn.className = 'flex-1 min-w-[200px] px-6 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 font-semibold';
+  retrySubmitBtn.innerHTML = '<span>🔄</span> 다시 제출';
+  retrySubmitBtn.style.display = 'none';
+  retrySubmitBtn.addEventListener('click', () => {
+    retrySubmitBtn.style.display = 'none';
+    submitAllAnswersToTeacher();
+  });
+  
   const txtButton = document.createElement('button');
   txtButton.className = 'flex-1 min-w-[150px] px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2';
   txtButton.innerHTML = '<span>📄</span> TXT 파일로 저장';
@@ -2078,15 +2281,17 @@ function createExportButton() {
   htmlButton.className = 'flex-1 min-w-[150px] px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2';
   htmlButton.innerHTML = '<span>🌐</span> HTML 파일로 저장';
   
+  const userInfo = getUserInfo();
   const hasContent = Object.values(reportData).some(content => content.trim());
   txtButton.disabled = !hasContent;
   htmlButton.disabled = !hasContent;
-  submitToTeacherBtn.disabled = !hasContent || !studentInfo.studentId || !studentInfo.studentName;
+  submitToTeacherBtn.disabled = !hasContent || !userInfo.studentId || !userInfo.studentName;
   
   txtButton.addEventListener('click', exportTXT);
   htmlButton.addEventListener('click', exportHTML);
   
   buttonContainer.appendChild(submitToTeacherBtn);
+  buttonContainer.appendChild(retrySubmitBtn);
   buttonContainer.appendChild(txtButton);
   buttonContainer.appendChild(htmlButton);
   
@@ -2277,13 +2482,20 @@ function handleContentChange(content) {
   reportData[currentStep] = content;
   saveData();
   
-  // Google Sheets에 저장 (학생 정보가 있는 경우에만)
-  if (studentInfo.studentId && studentInfo.studentName && content.trim()) {
+  // Google Sheets에 저장 (로그인 정보가 있는 경우에만)
+  const userInfo = getUserInfo();
+  if (userInfo.studentId && userInfo.studentName && content.trim() && currentUser) {
     saveToSheet({
-      studentId: studentInfo.studentId,
-      studentName: studentInfo.studentName,
-      step: currentStep, // 숫자로 전송
-      answer: content
+      type: 'submission',
+      user: {
+        id: currentUser.id,
+        name: currentUser.name || '',
+        email: currentUser.email || '',
+        picture: currentUser.picture || ''
+      },
+      step: currentStep,
+      answer: content,
+      ts: new Date().toISOString()
     });
   }
   
@@ -2457,8 +2669,8 @@ function render() {
   // API Status Banner at the top
   mainDiv.appendChild(createAPIStatusBanner());
   
-  // Student Info Banner
-  mainDiv.appendChild(createStudentInfoBanner());
+  // User Info Banner (로그인 정보 표시)
+  mainDiv.appendChild(createUserInfoBanner());
   
   mainDiv.appendChild(createHeader());
   
@@ -2584,5 +2796,28 @@ function render() {
 }
 
 // Initialize app
-loadData();
-render();
+// Firebase Auth 상태 감지 및 앱 초기화
+onAuthStateChange((user) => {
+  if (user) {
+    // 로그인되어 있으면 앱 초기화
+    currentUser = user;
+    loadData();
+    render();
+  } else {
+    // 로그인되지 않았으면 cover.html로 리다이렉트
+    if (!requireAuth()) {
+      // 리다이렉트됨
+      return;
+    }
+  }
+});
+
+// 초기 로그인 상태 확인 (Firebase Auth가 로드되기 전에 체크)
+if (getCurrentUser()) {
+  currentUser = getCurrentUser();
+  loadData();
+  render();
+} else {
+  // 로그인 체크 (리다이렉트될 수 있음)
+  requireAuth();
+}

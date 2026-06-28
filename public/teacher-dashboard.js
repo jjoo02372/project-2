@@ -15,9 +15,10 @@ const stepGuides = [
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw_PsbLZpDxaWZWA1zRcjLESqPV2ktxmYIvu4WdM7tHAFE8y-qIRmDgbdaQcvB9KYQexA/exec";
 
 // Dashboard State
-let currentView = 'list'; // 'list' or 'detail'
+let currentView = 'list'; // 'list', 'detail', or 'login-history'
 let selectedStudentKey = null;
 let scienceReports = {};
+let loginHistory = {}; // 로그인 기록 { userId: [{ timestamp, name, email }, ...] }
 let isLoading = false;
 
 // Load teacher dashboard data from Apps Script (GET request)
@@ -70,6 +71,12 @@ async function loadTeacherDashboardData() {
       console.warn('Response ok field is not true:', rawData);
     }
     
+    // 로그인 기록 로드 (있는 경우)
+    if (rawData.loginHistory && typeof rawData.loginHistory === 'object') {
+      loginHistory = rawData.loginHistory;
+      console.log('Loaded login history for', Object.keys(loginHistory).length, 'users');
+    }
+    
     // students 배열 확인
     if (rawData.students && Array.isArray(rawData.students)) {
       console.log('Found students array with', rawData.students.length, 'students');
@@ -80,9 +87,12 @@ async function loadTeacherDashboardData() {
           return;
         }
         
-        const studentId = student.studentId;
-        const studentName = student.studentName;
-        const studentKey = `${studentId}|${studentName}`;
+        // user 정보 우선 사용 (새로운 형식), 없으면 studentId/studentName 사용 (기존 형식)
+        const userId = student.user?.id || student.userId || student.studentId;
+        const userName = student.user?.name || student.studentName;
+        const userEmail = student.user?.email || student.email || '';
+        const userPicture = student.user?.picture || student.picture || '';
+        const studentKey = `${userId}|${userName}`;
         
         // steps 배열을 객체로 변환 (인덱스 0~8 -> step 1~9)
         const steps = {};
@@ -111,8 +121,12 @@ async function loadTeacherDashboardData() {
         const completedSteps = student.completedSteps !== undefined ? student.completedSteps : completedCount;
         
         scienceReports[studentKey] = {
-          studentId: studentId,
-          studentName: studentName,
+          studentId: userId, // 호환성을 위해 studentId 유지
+          studentName: userName, // 호환성을 위해 studentName 유지
+          userId: userId,
+          userName: userName,
+          email: userEmail,
+          picture: userPicture,
           updatedAt: updatedAt,
           completedSteps: completedSteps,
           steps: steps
@@ -321,6 +335,7 @@ function renderList() {
         <div style="display: flex; gap: 12px;">
           <button class="btn-refresh" onclick="refreshData()">🔄 새로고침</button>
           <button class="btn-sample" onclick="generateSampleData()">✨ 샘플 데이터 생성</button>
+          <button class="btn-login-history" onclick="showLoginHistory()" style="background: #10b981; color: white; padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">🔐 로그인 기록</button>
         </div>
       </header>
       
@@ -373,13 +388,23 @@ function renderList() {
         updatedAt = `${year}. ${month}. ${day}. ${ampm} ${displayHours}:${minutes}:${seconds}`;
       }
       
-      // Format student name display (support both formats: "이름 (학번)" or "이름 (학년반)")
-      let studentDisplay = `${student.studentName} (${student.studentId})`;
+      // Format student name display (user 정보 우선 사용)
+      const displayName = student.userName || student.studentName;
+      const displayId = student.userId || student.studentId;
+      const displayEmail = student.email || '';
+      let studentDisplay = `${displayName} (${displayId})`;
+      if (displayEmail) {
+        studentDisplay += `<br><span style="font-size: 12px; color: #666;">${displayEmail}</span>`;
+      }
       
       html += `
         <div class="student-card" data-student-key="${studentKey}">
           <div class="student-info">
-            <h3>${studentDisplay}</h3>
+            ${student.picture ? `<img src="${student.picture}" alt="프로필" style="width: 40px; height: 40px; border-radius: 50%; margin-right: 12px; border: 2px solid #c5b9e0;" />` : ''}
+            <div>
+              <h3>${studentDisplay}</h3>
+            </div>
+          </div>
             <div class="progress-info">
               <span class="progress-text">${completedCount}/9 완료</span>
               <div class="progress-bar">
@@ -424,7 +449,13 @@ function renderDetail(studentKey) {
     <div class="dashboard-container">
       <header class="dashboard-header">
         <button class="btn-back" onclick="renderList()">← 목록으로</button>
-        <h1>${student.studentName} (${student.studentId})</h1>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          ${student.picture ? `<img src="${student.picture}" alt="프로필" style="width: 48px; height: 48px; border-radius: 50%; border: 2px solid #c5b9e0;" />` : ''}
+          <div>
+            <h1>${student.userName || student.studentName} (${student.userId || student.studentId})</h1>
+            ${student.email ? `<p style="font-size: 14px; color: #666; margin-top: 4px;">${student.email}</p>` : ''}
+          </div>
+        </div>
         <button class="btn-evaluate" onclick="showEvaluation('${studentKey}')">📝 평가</button>
       </header>
       
@@ -654,12 +685,156 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// Show login history view
+function showLoginHistory() {
+  currentView = 'login-history';
+  selectedStudentKey = null;
+  
+  const app = document.getElementById('app');
+  const loginCount = Object.keys(loginHistory).length;
+  const totalLogins = Object.values(loginHistory).reduce((sum, logs) => sum + (Array.isArray(logs) ? logs.length : 0), 0);
+  
+  let html = `
+    <div class="dashboard-container">
+      <header class="dashboard-header">
+        <button class="btn-back" onclick="renderList()">← 목록으로</button>
+        <div>
+          <h1>🔐 로그인 기록</h1>
+          <div class="student-count">사용자 수: <strong>${loginCount}</strong>명 | 총 로그인: <strong>${totalLogins}</strong>회</div>
+        </div>
+        <button class="btn-refresh" onclick="refreshData(); showLoginHistory();">🔄 새로고침</button>
+      </header>
+      
+      <div class="dashboard-content">
+  `;
+  
+  if (loginCount === 0) {
+    html += `
+      <div class="empty-state">
+        <p><strong>로그인 기록이 없습니다.</strong></p>
+        <p style="margin-top: 16px; color: #666;">학생들이 로그인하면 여기에 기록이 표시됩니다.</p>
+      </div>
+    `;
+  } else {
+    html += '<div class="login-history-list">';
+    
+    // 사용자별로 정렬 (최근 로그인 순)
+    const users = Object.keys(loginHistory).sort((a, b) => {
+      const logsA = loginHistory[a];
+      const logsB = loginHistory[b];
+      const lastLoginA = Array.isArray(logsA) && logsA.length > 0 ? new Date(logsA[logsA.length - 1].timestamp || 0) : new Date(0);
+      const lastLoginB = Array.isArray(logsB) && logsB.length > 0 ? new Date(logsB[logsB.length - 1].timestamp || 0) : new Date(0);
+      return lastLoginB - lastLoginA;
+    });
+    
+    users.forEach(userId => {
+      const logs = loginHistory[userId];
+      if (!Array.isArray(logs) || logs.length === 0) return;
+      
+      // 첫 번째 로그인 정보 (사용자 이름, 이메일)
+      const firstLog = logs[0];
+      const userName = firstLog.name || firstLog.userName || '알 수 없음';
+      const userEmail = firstLog.email || '';
+      const loginCount = logs.length;
+      
+      // 최근 로그인 시간
+      const lastLog = logs[logs.length - 1];
+      const lastLoginTime = lastLog.timestamp ? new Date(lastLog.timestamp) : null;
+      
+      let lastLoginText = '알 수 없음';
+      if (lastLoginTime) {
+        const year = lastLoginTime.getFullYear();
+        const month = String(lastLoginTime.getMonth() + 1).padStart(2, '0');
+        const day = String(lastLoginTime.getDate()).padStart(2, '0');
+        const hours = lastLoginTime.getHours();
+        const minutes = String(lastLoginTime.getMinutes()).padStart(2, '0');
+        const seconds = String(lastLoginTime.getSeconds()).padStart(2, '0');
+        const ampm = hours < 12 ? '오전' : '오후';
+        const displayHours = hours % 12 || 12;
+        lastLoginText = `${year}. ${month}. ${day}. ${ampm} ${displayHours}:${minutes}:${seconds}`;
+      }
+      
+      html += `
+        <div class="login-history-card">
+          <div class="login-history-header">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              ${firstLog.picture ? `<img src="${firstLog.picture}" alt="프로필" style="width: 48px; height: 48px; border-radius: 50%; border: 2px solid #c5b9e0;" />` : ''}
+              <div>
+                <h3>${userName}</h3>
+                ${userEmail ? `<p style="font-size: 14px; color: #666; margin-top: 4px;">${userEmail}</p>` : ''}
+                <p style="font-size: 12px; color: #999; margin-top: 4px;">ID: ${userId}</p>
+              </div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 24px; font-weight: bold; color: #9333ea;">${loginCount}</div>
+              <div style="font-size: 12px; color: #666;">회 로그인</div>
+            </div>
+          </div>
+          <div class="login-history-info">
+            <div><strong>최근 로그인:</strong> ${lastLoginText}</div>
+            <div><strong>첫 로그인:</strong> ${logs[0].timestamp ? formatDate(new Date(logs[0].timestamp)) : '알 수 없음'}</div>
+          </div>
+          <details style="margin-top: 12px;">
+            <summary style="cursor: pointer; padding: 8px; background: #f3f4f6; border-radius: 8px; font-weight: bold;">
+              📋 전체 로그인 기록 보기 (${loginCount}건)
+            </summary>
+            <div style="margin-top: 12px; max-height: 300px; overflow-y: auto; background: #f9fafb; padding: 12px; border-radius: 8px;">
+              ${logs.reverse().map((log, idx) => {
+                const logTime = log.timestamp ? new Date(log.timestamp) : null;
+                let logTimeText = '알 수 없음';
+                if (logTime) {
+                  const year = logTime.getFullYear();
+                  const month = String(logTime.getMonth() + 1).padStart(2, '0');
+                  const day = String(logTime.getDate()).padStart(2, '0');
+                  const hours = logTime.getHours();
+                  const minutes = String(logTime.getMinutes()).padStart(2, '0');
+                  const seconds = String(logTime.getSeconds()).padStart(2, '0');
+                  const ampm = hours < 12 ? '오전' : '오후';
+                  const displayHours = hours % 12 || 12;
+                  logTimeText = `${year}. ${month}. ${day}. ${ampm} ${displayHours}:${minutes}:${seconds}`;
+                }
+                return `<div style="padding: 8px; border-bottom: 1px solid #e5e7eb; ${idx === logs.length - 1 ? 'border-bottom: none;' : ''}">
+                  <div style="font-weight: bold;">${logTimeText}</div>
+                </div>`;
+              }).join('')}
+            </div>
+          </details>
+        </div>
+      `;
+    });
+    
+    html += '</div>';
+  }
+  
+  html += `
+      </div>
+    </div>
+  `;
+  
+  app.innerHTML = html;
+}
+
+// Format date helper
+function formatDate(date) {
+  if (!date || isNaN(date.getTime())) return '알 수 없음';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  const ampm = hours < 12 ? '오전' : '오후';
+  const displayHours = hours % 12 || 12;
+  return `${year}. ${month}. ${day}. ${ampm} ${displayHours}:${minutes}:${seconds}`;
+}
+
 // Make functions available globally
 window.renderList = renderList;
 window.renderDetail = renderDetail;
 window.showEvaluation = showEvaluation;
 window.refreshData = refreshData;
 window.generateSampleData = generateSampleData;
+window.showLoginHistory = showLoginHistory;
 
 // Initialize dashboard when DOM is ready
 if (document.readyState === 'loading') {
